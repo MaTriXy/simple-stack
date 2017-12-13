@@ -17,6 +17,7 @@
 package com.example.stackmasterdetailfrag.application;
 
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.view.Menu;
@@ -73,28 +74,11 @@ public class MainActivity
         backstackDelegate.setStateClearStrategy(new MasterDetailStateClearStrategy());
         backstackDelegate.onCreate(savedInstanceState,
                 getLastCustomNonConfigurationInstance(), HistoryBuilder.single(ConversationListPath.create()));
+        backstackDelegate.registerForLifecycleCallbacks(this);
         setContentView(R.layout.root_layout);
         container = (StateChanger) findViewById(R.id.container);
         containerAsBackTarget = (HandlesBack) container;
         backstackDelegate.setStateChanger(this);
-    }
-
-    @Override
-    protected void onPostResume() {
-        super.onPostResume();
-        backstackDelegate.onPostResume();
-    }
-
-    @Override
-    protected void onPause() {
-        backstackDelegate.onPause();
-        super.onPause();
-    }
-
-    @Override
-    protected void onDestroy() {
-        backstackDelegate.onDestroy();
-        super.onDestroy();
     }
 
     @Override
@@ -117,12 +101,6 @@ public class MainActivity
             return this;
         }
         return super.getSystemService(name);
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        backstackDelegate.onSaveInstanceState(outState);
     }
 
     @Override
@@ -162,7 +140,7 @@ public class MainActivity
     }
 
     @Override
-    public void handleStateChange(StateChange traversal, final StateChanger.Callback callback) {
+    public void handleStateChange(@NonNull StateChange traversal, @NonNull final StateChanger.Callback callback) {
         Path path = traversal.topNewState();
         setTitle(path.getTitle());
         ActionBar actionBar = getSupportActionBar();

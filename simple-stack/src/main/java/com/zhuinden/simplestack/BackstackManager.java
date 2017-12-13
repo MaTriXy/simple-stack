@@ -24,6 +24,7 @@ import android.view.View;
 import com.zhuinden.statebundle.StateBundle;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,7 +62,7 @@ public class BackstackManager
 
     private final StateChanger managedStateChanger = new StateChanger() {
         @Override
-        public void handleStateChange(final StateChange stateChange, final Callback completionCallback) {
+        public void handleStateChange(@NonNull final StateChange stateChange, @NonNull final Callback completionCallback) {
             stateChanger.handleStateChange(stateChange, new Callback() {
                 @Override
                 public void stateChangeComplete() {
@@ -74,8 +75,26 @@ public class BackstackManager
         }
     };
 
+    private KeyFilter keyFilter = new DefaultKeyFilter();
     private KeyParceler keyParceler = new DefaultKeyParceler();
     private StateClearStrategy stateClearStrategy = new DefaultStateClearStrategy();
+
+    /**
+     * Specifies a custom {@link KeyFilter}, allowing keys to be filtered out if they should not be restored after process death.
+     *
+     * If used, this method must be called before {@link BackstackManager#setup(List)} .
+     *
+     * @param keyFilter The custom {@link KeyFilter}.
+     */
+    public void setKeyFilter(@NonNull KeyFilter keyFilter) {
+        if(backstack != null) {
+            throw new IllegalStateException("Custom key filter should be set before calling `setup()`");
+        }
+        if(keyFilter == null) {
+            throw new IllegalArgumentException("The key filter cannot be null!");
+        }
+        this.keyFilter = keyFilter;
+    }
 
     /**
      * Specifies a custom {@link KeyParceler}, allowing key parcellation strategies to be used for turning a key into Parcelable.
@@ -84,7 +103,7 @@ public class BackstackManager
      *
      * @param keyParceler The custom {@link KeyParceler}.
      */
-    public void setKeyParceler(KeyParceler keyParceler) {
+    public void setKeyParceler(@NonNull KeyParceler keyParceler) {
         if(backstack != null) {
             throw new IllegalStateException("Custom key parceler should be set before calling `setup()`");
         }
@@ -102,7 +121,7 @@ public class BackstackManager
      *
      * @param stateClearStrategy The custom {@link StateClearStrategy}.
      */
-    public void setStateClearStrategy(StateClearStrategy stateClearStrategy) {
+    public void setStateClearStrategy(@NonNull StateClearStrategy stateClearStrategy) {
         if(backstack != null) {
             throw new IllegalStateException("Custom state clear strategy should be set before calling `setup()`");
         }
@@ -207,7 +226,7 @@ public class BackstackManager
         if(view != null) {
             Object key = KeyContextWrapper.getKey(view.getContext());
             if(key == null) {
-                throw new IllegalArgumentException("The view [" + view + "] contained no key!");
+                throw new IllegalArgumentException("The view [" + view + "] contained no key in its context hierarchy. The view or its parent hierarchy should be inflated by a layout inflater from `stateChange.createContext(baseContext, key)`, or a KeyContextWrapper.");
             }
             SparseArray<Parcelable> viewHierarchyState = new SparseArray<>();
             view.saveHierarchyState(viewHierarchyState);
@@ -242,6 +261,46 @@ public class BackstackManager
     }
 
     /**
+     * Allows adding a {@link Backstack.CompletionListener} to the internal {@link Backstack} that is called when the state change is completed, but before the state is cleared.
+     *
+     * Please note that a strong reference is kept to the listener, and the {@link Backstack} is typically preserved across configuration change.
+     * It is recommended that it is NOT an anonymous inner class or normal inner class in an Activity,
+     * because that could cause memory leaks.
+     *
+     * Instead, it should be a class, or a static inner class.
+     *
+     * @param stateChangeCompletionListener the state change completion listener.
+     */
+    public void addStateChangeCompletionListener(@NonNull Backstack.CompletionListener stateChangeCompletionListener) {
+        checkBackstack("A backstack must be set up before a state change completion listener is added to it.");
+        if(stateChangeCompletionListener == null) {
+            throw new IllegalArgumentException("StateChangeCompletionListener cannot be null!");
+        }
+        this.backstack.addCompletionListener(stateChangeCompletionListener);
+    }
+
+    /**
+     * Removes the provided {@link Backstack.CompletionListener}.
+     *
+     * @param stateChangeCompletionListener the state change completion listener.
+     */
+    public void removeStateChangeCompletionListener(@NonNull Backstack.CompletionListener stateChangeCompletionListener) {
+        checkBackstack("A backstack must be set up before a state change completion listener is removed from it.");
+        if(stateChangeCompletionListener == null) {
+            throw new IllegalArgumentException("StateChangeCompletionListener cannot be null!");
+        }
+        this.backstack.removeCompletionListener(stateChangeCompletionListener);
+    }
+
+    /**
+     * Removes all {@link Backstack.CompletionListener}s added to the {@link Backstack}.
+     */
+    public void removeAllStateChangeCompletionListeners() {
+        checkBackstack("A backstack must be set up before state change completion listeners are removed from it.");
+        this.backstack.removeCompletionListeners();
+    }
+
+    /**
      * Restores the BackstackManager from a StateBundle.
      * This can only be called after {@link BackstackManager#setup(List)}.
      *
@@ -258,14 +317,21 @@ public class BackstackManager
                     keys.add(keyParceler.fromParcelable(parcelledKey));
                 }
             }
+            keys = keyFilter.filterHistory(new ArrayList<>(keys));
+            if(keys == null) {
+                keys = Collections.emptyList(); // lenient against null
+            }
             if(!keys.isEmpty()) {
                 backstack.setInitialParameters(keys);
             }
             List<ParcelledState> savedStates = stateBundle.getParcelableArrayList(getStatesTag());
             if(savedStates != null) {
                 for(ParcelledState parcelledState : savedStates) {
-                    SavedState savedState = SavedState.builder()
-                            .setKey(keyParceler.fromParcelable(parcelledState.parcelableKey))
+                    Object key = keyParceler.fromParcelable(parcelledState.parcelableKey);
+                    if(!keys.contains(key)) {
+                        continue;
+                    }
+                    SavedState savedState = SavedState.builder().setKey(key)
                             .setViewHierarchyState(parcelledState.viewHierarchyState)
                             .setBundle(parcelledState.bundle)
                             .build();

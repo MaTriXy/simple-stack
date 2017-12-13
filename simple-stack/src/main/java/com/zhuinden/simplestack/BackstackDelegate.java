@@ -15,6 +15,9 @@
  */
 package com.zhuinden.simplestack;
 
+import android.annotation.TargetApi;
+import android.app.Activity;
+import android.app.Application;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -23,6 +26,8 @@ import android.view.View;
 import com.zhuinden.statebundle.StateBundle;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * A delegate class that manages the {@link Backstack}'s Activity lifecycle integration,
@@ -37,13 +42,33 @@ public class BackstackDelegate {
     private String persistenceTag = UNINITIALIZED;
 
     /**
+     * Specifies a custom {@link KeyFilter}, allowing keys to be filtered out if they should not be restored after process death.
+     *
+     * If used, this method must be called before {@link BackstackDelegate#onCreate(Bundle, Object, ArrayList)}.
+     *
+     * @param keyFilter The custom {@link KeyFilter}.
+     */
+    public void setKeyFilter(@NonNull KeyFilter keyFilter) {
+        if(backstackManager != null && backstackManager.getBackstack() != null) {
+            throw new IllegalStateException("If set, key filter must be set before calling `onCreate()`");
+        }
+        if(keyFilter == null) {
+            throw new IllegalArgumentException("Specified custom key filter should not be null!");
+        }
+        this.keyFilter = keyFilter;
+    }
+
+    /**
      * Specifies a custom {@link KeyParceler}, allowing key parcellation strategies to be used for turning a key into Parcelable.
      *
      * If used, this method must be called before {@link BackstackDelegate#onCreate(Bundle, Object, ArrayList)}.
      *
      * @param keyParceler The custom {@link KeyParceler}.
      */
-    public void setKeyParceler(KeyParceler keyParceler) {
+    public void setKeyParceler(@NonNull KeyParceler keyParceler) {
+        if(backstackManager != null && backstackManager.getBackstack() != null) {
+            throw new IllegalStateException("If set, key parceler must set before calling `onCreate()`");
+        }
         if(keyParceler == null) {
             throw new IllegalArgumentException("Specified custom key parceler should not be null!");
         }
@@ -58,19 +83,44 @@ public class BackstackDelegate {
      *
      * @param stateClearStrategy The custom {@link BackstackManager.StateClearStrategy}.
      */
-    public void setStateClearStrategy(BackstackManager.StateClearStrategy stateClearStrategy) {
+    public void setStateClearStrategy(@NonNull BackstackManager.StateClearStrategy stateClearStrategy) {
+        if(backstackManager != null && backstackManager.getBackstack() != null) {
+            throw new IllegalStateException("If set, state clear strategy must be set before calling `onCreate()`");
+        }
         if(stateClearStrategy == null) {
             throw new IllegalArgumentException("Specified state clear strategy should not be null!");
         }
         this.stateClearStrategy = stateClearStrategy;
     }
 
+    /**
+     * Adds a {@link Backstack.CompletionListener}, which will be added to the {@link Backstack} when it is initialized.
+     * As it is added only on initialization, these are added to the Backstack only once.
+     *
+     * Please note that this should not be an anonymous inner class, because this is kept across configuration changes.
+     *
+     * This can only be called before {@link BackstackDelegate#onCreate(Bundle, Object, ArrayList)}.
+     *
+     * @param stateChangeCompletionListener the state change completion listener
+     */
+    public void addStateChangeCompletionListener(@NonNull Backstack.CompletionListener stateChangeCompletionListener) {
+        if(backstackManager != null && backstackManager.getBackstack() != null) {
+            throw new IllegalStateException("If adding, completion listener must be added before calling `onCreate()`");
+        }
+        if(stateChangeCompletionListener == null) {
+            throw new IllegalArgumentException("Specified state change completion listener should not be null!");
+        }
+        this.stateChangeCompletionListeners.add(stateChangeCompletionListener);
+    }
+
     private static final String HISTORY = "simplestack.HISTORY";
 
     private StateChanger stateChanger;
 
+    private KeyFilter keyFilter = new DefaultKeyFilter();
     private KeyParceler keyParceler = new DefaultKeyParceler();
     private BackstackManager.StateClearStrategy stateClearStrategy = new DefaultStateClearStrategy();
+    private List<Backstack.CompletionListener> stateChangeCompletionListeners = new LinkedList<>();
 
     /**
      * Persistence tag allows you to have multiple {@link BackstackDelegate}s in the same activity.
@@ -111,11 +161,81 @@ public class BackstackDelegate {
     }
 
     /**
+     * Convenience method that automatically handles calling the following methods:
+     * - {@link BackstackDelegate#onPostResume()}
+     * - {@link BackstackDelegate#onPause()}
+     * - {@link BackstackDelegate#onSaveInstanceState(Bundle)}
+     * - {@link BackstackDelegate#onDestroy()}.
+     *
+     * This method can only be called after {@link BackstackDelegate#onCreate(Bundle, Object, ArrayList)}.
+     *
+     * Note: This method cannot handle {@link BackstackDelegate#onRetainCustomNonConfigurationInstance()}, so that must still be called manually.
+     *
+     * @param activity the Activity whose callbacks we register for.
+     */
+    @TargetApi(14)
+    public void registerForLifecycleCallbacks(@NonNull final Activity activity) {
+        if(activity == null) {
+            throw new NullPointerException("Activity is null");
+        }
+        @SuppressWarnings("unused") BackstackManager backstackManager = getManager();
+        final Application application = activity.getApplication();
+        application.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityCreated(Activity a, Bundle savedInstanceState) {
+                // this is executed too late. do nothing.
+            }
+
+            @Override
+            public void onActivityStarted(Activity a) {
+                if(activity == a) {
+                    // do nothing
+                }
+            }
+
+            @Override
+            public void onActivityResumed(Activity a) {
+                if(activity == a) {
+                    onPostResume();
+                }
+            }
+
+            @Override
+            public void onActivityPaused(Activity a) {
+                if(activity == a) {
+                    onPause();
+                }
+            }
+
+            @Override
+            public void onActivityStopped(Activity a) {
+                if(activity == a) {
+                    // do nothing
+                }
+            }
+
+            @Override
+            public void onActivitySaveInstanceState(Activity a, Bundle outState) {
+                if(activity == a) {
+                    onSaveInstanceState(outState);
+                }
+            }
+
+            @Override
+            public void onActivityDestroyed(Activity a) {
+                if(activity == a) {
+                    onDestroy();
+                    application.unregisterActivityLifecycleCallbacks(this);
+                }
+            }
+        });
+    }
+
+    /**
      * The onCreate() delegate for the Activity.
      * It initializes the backstack from either the non-configuration instance, the saved state, or creates a new one.
      * Restores the {@link SavedState} that belongs to persisted view state.
      * Begins an initialize {@link StateChange} if the {@link StateChanger} is set.
-     * Also registers a {@link Backstack.CompletionListener} that must be unregistered with {@link BackstackDelegate#onDestroy()}.
      *
      * @param savedInstanceState       The Activity saved instance state bundle.
      * @param nonConfigurationInstance The {@link NonConfigurationInstance} that is typically obtained with getLastCustomNonConfigurationInstance().
@@ -132,9 +252,13 @@ public class BackstackDelegate {
         }
         if(backstackManager == null) {
             backstackManager = new BackstackManager();
+            backstackManager.setKeyFilter(keyFilter);
             backstackManager.setKeyParceler(keyParceler);
             backstackManager.setStateClearStrategy(stateClearStrategy);
             backstackManager.setup(initialKeys);
+            for(Backstack.CompletionListener completionListener : stateChangeCompletionListeners) {
+                backstackManager.addStateChangeCompletionListener(completionListener);
+            }
             if(savedInstanceState != null) {
                 backstackManager.fromBundle(savedInstanceState.<StateBundle>getParcelable(getHistoryTag()));
             }
@@ -150,14 +274,16 @@ public class BackstackDelegate {
      */
     public void setStateChanger(@Nullable StateChanger stateChanger) {
         this.stateChanger = stateChanger;
-        backstackManager.setStateChanger(stateChanger);
+        if(backstackManager != null) { // allowed before `onCreate()`
+            backstackManager.setStateChanger(stateChanger);
+        }
     }
 
     /**
      * The onRetainCustomNonConfigurationInstance() delegate for the Activity.
      * This is required to make sure that the Backstack survives configuration change.
      *
-     * @return a {@link NonConfigurationInstance} that contains the internal backstack instance.
+     * @return a {@link NonConfigurationInstance} that contains the internal {@link BackstackManager}.
      */
     public NonConfigurationInstance onRetainCustomNonConfigurationInstance() {
         return new NonConfigurationInstance(backstackManager);
@@ -181,9 +307,7 @@ public class BackstackDelegate {
      * @param outState the Bundle into which the backstack history and view states are saved.
      */
     public void onSaveInstanceState(@NonNull Bundle outState) {
-        if(backstackManager == null) {
-            throw new IllegalStateException("You can call this method only after `onCreate()`");
-        }
+        BackstackManager backstackManager = getManager(); // assertion!
         outState.putParcelable(getHistoryTag(), backstackManager.toBundle());
     }
 
@@ -195,10 +319,7 @@ public class BackstackDelegate {
         if(stateChanger == null) {
             throw new IllegalStateException("State changer is still not set in `onPostResume`!");
         }
-        if(backstackManager == null) {
-            throw new IllegalStateException("You can call this method only after `onCreate()`");
-        }
-        backstackManager.reattachStateChanger();
+        getManager().reattachStateChanger();
     }
 
     /**
@@ -206,10 +327,7 @@ public class BackstackDelegate {
      * It removes the {@link StateChanger} if it is set.
      */
     public void onPause() {
-        if(backstackManager == null) {
-            throw new IllegalStateException("You can call this method only after `onCreate()`");
-        }
-        backstackManager.detachStateChanger();
+        getManager().detachStateChanger();
     }
 
     /**
@@ -230,10 +348,7 @@ public class BackstackDelegate {
      */
     @NonNull
     public Backstack getBackstack() {
-        if(backstackManager == null) {
-            throw new IllegalStateException("The backstack within the delegate must be initialized by `onCreate()`");
-        }
-        return backstackManager.getBackstack();
+        return getManager().getBackstack();
     }
 
     // ----- viewstate persistence
@@ -244,10 +359,7 @@ public class BackstackDelegate {
      * @param view the view that belongs to a certain key
      */
     public void persistViewToState(@Nullable View view) {
-        if(backstackManager == null) {
-            throw new IllegalStateException("You can call this method only after `onCreate()`");
-        }
-        backstackManager.persistViewToState(view);
+        getManager().persistViewToState(view);
     }
 
     /**
@@ -256,10 +368,7 @@ public class BackstackDelegate {
      * @param view the view that belongs to a certain key
      */
     public void restoreViewFromState(@NonNull View view) {
-        if(backstackManager == null) {
-            throw new IllegalStateException("You can call this method only after `onCreate()`");
-        }
-        backstackManager.restoreViewFromState(view);
+        getManager().restoreViewFromState(view);
     }
 
     /**
@@ -271,10 +380,20 @@ public class BackstackDelegate {
      */
     @NonNull
     public SavedState getSavedState(@NonNull Object key) {
+        return getManager().getSavedState(key);
+    }
+
+    /**
+     * Returns the {@link BackstackManager}. If called before {@link BackstackDelegate#onCreate(Bundle, Object, ArrayList)}, it throws an exception.
+     *
+     * @return the backstack manager
+     */
+    @NonNull
+    public BackstackManager getManager() {
         if(backstackManager == null) {
-            throw new IllegalStateException("You can call this method only after `onCreate()`");
+            throw new IllegalStateException("This method can only be called after calling `onCreate()`");
         }
-        return backstackManager.getSavedState(key);
+        return backstackManager;
     }
 
     /**

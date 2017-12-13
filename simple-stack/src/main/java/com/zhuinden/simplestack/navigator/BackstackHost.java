@@ -22,6 +22,7 @@ import android.view.ViewGroup;
 
 import com.zhuinden.simplestack.Backstack;
 import com.zhuinden.simplestack.BackstackManager;
+import com.zhuinden.simplestack.KeyFilter;
 import com.zhuinden.simplestack.KeyParceler;
 import com.zhuinden.simplestack.StateChanger;
 import com.zhuinden.statebundle.StateBundle;
@@ -41,9 +42,11 @@ public final class BackstackHost
     }
 
     StateChanger stateChanger;
-
+    KeyFilter keyFilter;
     KeyParceler keyParceler;
     BackstackManager.StateClearStrategy stateClearStrategy;
+    List<Backstack.CompletionListener> stateChangeCompletionListeners;
+
     boolean shouldPersistContainerChild;
 
     BackstackManager backstackManager;
@@ -62,9 +65,13 @@ public final class BackstackHost
     Backstack initialize(boolean isInitializeDeferred) {
         if(backstackManager == null) {
             backstackManager = new BackstackManager();
+            backstackManager.setKeyFilter(keyFilter);
             backstackManager.setKeyParceler(keyParceler);
             backstackManager.setStateClearStrategy(stateClearStrategy);
             backstackManager.setup(initialKeys);
+            for(Backstack.CompletionListener completionListener : stateChangeCompletionListeners) {
+                backstackManager.addStateChangeCompletionListener(completionListener);
+            }
             if(savedInstanceState != null) {
                 backstackManager.fromBundle(savedInstanceState.<StateBundle>getParcelable("NAVIGATOR_STATE_BUNDLE"));
             }

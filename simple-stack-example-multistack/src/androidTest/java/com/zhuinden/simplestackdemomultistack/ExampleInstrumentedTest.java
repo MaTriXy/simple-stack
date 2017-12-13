@@ -1,4 +1,4 @@
-package com.zhuinden.simplestackdemoexample;
+package com.zhuinden.simplestackexamplekotlin;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;

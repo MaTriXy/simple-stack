@@ -1,4 +1,4 @@
-package com.zhuinden.simplestackdemoexample;
+package com.zhuinden.simplestackexamplekotlin;
 
 import org.junit.Test;
 

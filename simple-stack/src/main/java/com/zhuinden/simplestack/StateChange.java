@@ -21,6 +21,9 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
 import java.lang.annotation.Retention;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 import static java.lang.annotation.RetentionPolicy.SOURCE;
@@ -38,35 +41,61 @@ public class StateChange {
     public static final int BACKWARD = -1;
     public static final int FORWARD = 1;
 
-    StateChange(List<Object> previousState, List<Object> newState, @StateChangeDirection int direction) {
+    StateChange(Backstack backstack, List<Object> previousState, List<Object> newState, @StateChangeDirection int direction) {
+        this.backstack = backstack;
         this.previousState = previousState;
         this.newState = newState;
         this.direction = direction;
     }
 
+    Backstack backstack;
     List<Object> previousState;
     List<Object> newState;
     int direction;
 
     /**
+     * The backstack this state change was executed by.
+     *
+     * @return the backstack
+     */
+    @NonNull
+    public Backstack backstack() {
+        return backstack;
+    }
+
+    // create a copy list where each item is casted to <T>
+    private <T> List<T> createParametricCopyList(List<Object> list) {
+        List<T> copyList = new LinkedList<>();
+        for(Object key : list) {
+            // noinspection unchecked
+            copyList.add((T)key);
+        }
+        return Collections.unmodifiableList(new ArrayList<T>(copyList));
+    }
+
+    /**
      * The previous state from before the new keys were set.
      * If empty, then this is an initialize {@link StateChange}.
+     *
+     * @param <T> the type of the key
      *
      * @return the previous state.
      */
     @NonNull
-    public List<Object> getPreviousState() {
-        return previousState;
+    public <T> List<T> getPreviousState() {
+        return createParametricCopyList(previousState);
     }
 
     /**
      * The new state after the state change is complete.
      *
+     * @param <T> the type of the key
+     *
      * @return the new state.
      */
     @NonNull
-    public List<Object> getNewState() {
-        return newState;
+    public <T> List<T> getNewState() {
+        return createParametricCopyList(newState);
     }
 
     /**
@@ -113,7 +142,7 @@ public class StateChange {
      * @return the context to use used with LayoutInflater.from().
      */
     @NonNull
-    public Context createContext(Context base, Object key) {
+    public Context createContext(@NonNull Context base, @NonNull Object key) {
         return new KeyContextWrapper(base, key);
     }
 }

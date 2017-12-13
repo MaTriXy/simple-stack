@@ -1,5 +1,142 @@
 # Change log
 
+-Simple Stack _._._ (__-__-__)
+--------------------------------
+
+- Updated to use implementation/api and AS 3.0's tooling.
+
+- Updated implementation lib versions in samples and tests.
+
+- Updated State-Bundle to 1.2.0.
+
+- Updated Kotlin example to use Fragment-based usage.
+
+-Simple Stack 1.8.0 (2017-10-25) 
+--------------------------------
+
+- BREAKING(?) CHANGE / FIX: when `goBack()` returns false, then the backstack is not cleared automatically. Added `reset()` to allow imitating the previous behavior. 
+
+Previous behavior would now be the same as:
+
+    if(!backstack.goBack() && !backstack.isStateChangePending()) {
+        backstack.reset();
+    }
+    
+Honestly, this might have been unexpected, as `goBack()` returning `false` had the side-effect of clearing the stack, and next state change using the initial key!
+
+The test that checks for this has been changed to use the above construct. Another test of course has been added to validate new behavior.
+
+Also, to eliminate the possibility of `reset()` misuse, it is only allowed when there are no pending state changes.
+
+- BREAKING CHANGE: `getInitialParameters()` is renamed to `getInitialKeys()`. 
+
+- FIX: `getInitialParameters()` returned the actual list instead of an unmodifiable copy, it returns the keys provided at initialization.
+
+- ADDED: `replaceTop()` backstack operator, which replaces current top with the provided key.
+
+- ADDED: `goUp()` backstack operator, which will go back to the provided key if exists, replace top with new key otherwise.
+
+- ADDED: `goUpChain()` backstack operator, which will:
+
+  - If the chain of parents is found as previous elements, then it works as back navigation to that chain.
+  - If the whole chain is not found, but at least one element of it is found, then the history is kept up to that point, then the chain is added, any duplicate element in the chain is added to the end as part of the chain.
+  - If none of the chain is found, the current top is removed, and the provided parent chain is added.
+  
+  I added a bunch of tests for this, hopefully I didn't forget anything!
+
+- ENHANCEMENT/FIX: `HistoryBuilder.get()` is now `@NonNull`, because `HistoryBuilder.from(List<?>)` throws if List contains `null`.
+
+- ENHANCEMENT: `getHistory()` and `getInitialParameters()`  also returns a `List<T>` in which each element is cast to `T`. 
+
+- FIX: `BackstackDelegate.setStateChanger()` should have been allowed even without calling `backstackDelegate.onCreate()` first. All the samples use `new BackstackDelegate(null)` so it never came up.
+
+- ENHANCEMENT: Some improvement to `persistViewToState()` exception message if the view has no key (so that it references `KeyContextWrapper` and `stateChange.createContext()`).
+
+-Simple Stack 1.7.2 (2017-07-24)
+--------------------------------
+- MINOR CHANGE + ENHANCEMENT: `StateChange.getNewState()` and `StateChange.getPreviousState()` return a copy of the list (it was already a copy, don't worry), where each item is casted to `<T>` specified as generic parameter.
+
+For example, the following can be changed from:
+
+``` java
+for(Object _newKey : stateChange.getNewState()) {
+    Key newKey = (Key)_newKey;
+    // ...
+}
+```
+
+to:
+
+``` java
+for(Key newKey : stateChange.<Key>getNewState()) {
+   // ...
+}
+```
+
+And the following works now as well:
+
+``` java
+List<Key> newKeys = stateChange.getNewState(); // used to return List<Object>
+```
+
+-Simple Stack 1.7.1 (2017-07-11)
+--------------------------------
+- ADDED: `BackstackDelegate.registerForLifecycleCallbacks(Activity)` convenience method (API 14+).
+
+This method allows you to call this after `BackstackDelegate.onCreate()`, after which the following 4 methods no longer need to be called manually:
+
+    - `onPostResume()`
+    - `onPause()`
+    - `onSaveInstanceState(Bundle)`
+    - `onDestroy()`
+
+Therefore the callbacks that ought to be called remain as `onCreate()`, `onRetainCustomNonConfigurationInstance()`, and of course `onBackPressed()`.
+
+-Simple Stack 1.7.0 (2017-07-04)
+--------------------------------
+- REMOVED: `BackstackManager.StateChangeCompletionListener`. It is replaced by `Backstack.CompletionListener`, which was added back in 0.9.1 (and is more reliable).
+
+This also fixes a possible bug with incorrect call order of state change completion listeners.
+
+The API is otherwise exactly the same, `StateChangeCompletionListener` should have been `Backstack.CompletionListener` from the start.
+
+- ADDED: `backstackDelegate.getManager()`, just to make sure its API mirrors `Navigator`.
+
+-Simple Stack 1.6.3 (2017-06-28)
+--------------------------------
+- Added missing `@NonNull` and `@Nullable` annotations where applicable.
+
+-Simple Stack 1.6.2 (2017-05-14)
+--------------------------------
+- MINOR CHANGE: `DefaultStateChanger` no longer explicitly demands a `StateKey`, because both `LayoutInflationStrategy` and `GetViewChangeHandlerStrategy` can be re-defined for custom behavior.
+
+- Added `GetViewChangeHandlerStrategy` to `DefaultStateChanger` to allow re-defining the view change handler behavior.
+
+- Added `ContextCreationStrategy` to `DefaultStateChanger` to support Mortar scopes, or anything similar in design.
+
+- Added `BackstackManager.StateChangeCompletionListener` to add a hook where you can listen for the completion of state changes reliably - even if they were forced to execute.
+
+Also added `addStateChangeCompletionListener` to `BackstackDelegate` and `Navigator.Installer` accordingly. 
+
+Please make sure it does not retain a reference to enclosing Activity, to avoid memory leaks.
+
+- Minor fix: `setKeyFilter()`, `setKeyParceler()`, and `setStateClearStrategy()` in `BackstackDelegate` now throw if they are set after calling `onCreate()`, as per docs.
+
+- Bump `state-bundle` version to `1.1.5`
+
+- ADDED: `simple-stack-mortar-sample`, which is based on `mortar-sample` from `square/mortar`, but using `Simple-Stack` and `Service-Tree`.
+
+-Simple Stack 1.6.1 (2017-05-08)
+--------------------------------
+- Added `GetPreviousViewStrategy` to `DefaultStateChanger` as per request (#36).
+
+-Simple Stack 1.6.0 (2017-05-03)
+--------------------------------
+- Added `KeyFilter` to allow clearing out keys on process death that should not be restored.
+- Added `stateChange.backstack()` which returns the backstack this state change was executed by.
+- Added `DefaultStateChanger.ViewChangeStartListener` for *before* the view change, but *after* the state restore
+- Added `DefaultStateChanger.LayoutInflationStrategy` to support asynchronous layout inflation (if you need it) or hopefully Anko
+
 -Simple Stack 1.5.3 (2017-04-21)
 --------------------------------
 - Bump `state-bundle` version to `1.1.4`

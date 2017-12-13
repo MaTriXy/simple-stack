@@ -4,19 +4,25 @@ Similarly to [square/flow](https://github.com/square/flow), Simple Stack allows 
 
 The library also allows easy backstack persisting through a delegate class, which handles configuration changes and process death.
 
-If your data classes are not `Parcelable` by default, then you can specify a custom parcellation strategy using `backstackDelegate.setKeyParceler()`.
+If your data classes are not `Parcelable` by default, then you can specify a custom parcellation strategy using `setKeyParceler()`.
 
-Additionally, the delegate also allows you to persist state of custom viewgroups that are associated with a given UI state into a Bundle.
+Additionally, the library also allows you to persist state of custom viewgroups that are associated with a given UI state into a `StateBundle`.
 
 This way, you can easily create a single-Activity application using either views, fragments, or whatevers.
 
 ## Operators
 
-The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) provides 3 convenient operators for manipulating state.
+The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) provides 3 primary operators for manipulating state.
 
 - `goTo()`: if state does not previously exist in the backstack, then adds it to the stack. Otherwise navigate back to given state.
 - `goBack()`: returns boolean if [StateChange](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChange.java) is in progress, or if there are more than 1 entries in history (and handled the back press). Otherwise, return false.
 - `setHistory()`: sets the state to the provided elements, with the direction that is specified.
+
+The secondary operators are:
+
+- `replaceTop()`: removes the current top element, and replaces it with the newly provided one.
+- `goUp()`: navigates back to the element if exists, replaces current top with it if does not.
+- `goUpChain()`: goes up to the parent chain if exists completely, replaces current with the chain if partially exists (while re-ordering existing duplicates to match the provided chain), and replaces current with chain if doesn't exist.
 
 ## What does it do?
 
@@ -26,17 +32,17 @@ The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stac
 
 The library also provides two ways to handle both view-state persistence for views associated with a key, and persisting the keys across configuration change / process death.
 
-- The [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java), which works via manual Activity lifecycle callbacks.
-
 - The [Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java), which uses the [BackstackHost](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/BackstackHost.java) retained fragment (API 11+) to automatically receive the lifecycle callbacks, and survive configuration change.
 
-Internally, both the the [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java) and the [Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java) uses a [BackstackManager](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackManager.java), which can also be used.
+- The [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java), which works via manual Activity lifecycle callbacks - typically needed only for fragments.
+
+Internally, both the [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java) and the [Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java) uses a [BackstackManager](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackManager.java), which can also be used.
 
 -----------
 
 The library provides a [DefaultStateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/DefaultStateChanger.java), which by default uses [Navigator]([Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java)) to handle the persistence.
 
-The keys used by a [DefaultStateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/DefaultStateChanger.java) must implement [StateKey](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/StateKey.java).
+The keys used by a [DefaultStateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/DefaultStateChanger.java) must implement [StateKey](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/StateKey.java), which expects a layout key and a view change handler.
 
 ## Using Simple Stack
 
@@ -60,7 +66,7 @@ In order to use Simple Stack, you need to add jitpack to your project root gradl
 
 and add the compile dependency to your module level gradle.
 
-    compile 'com.github.Zhuinden:simple-stack:1.5.3'
+    compile 'com.github.Zhuinden:simple-stack:1.8.0'
 
 ## How does it work?
 
@@ -78,6 +84,105 @@ Afterwards, the [Backstack](https://github.com/Zhuinden/simple-stack/blob/master
 
 ## Example code
 
+### Fragments
+
+Check out the details in [simple-stack-example-basic-fragment](https://github.com/Zhuinden/simple-stack/tree/master/simple-stack-example-basic-fragment) to see how to make Simple-Stack work with Fragments (or the relevant wiki page).
+
+- **End result**
+
+``` java
+    public void navigateTo(Object key) {
+        backstackDelegate.getBackstack().goTo(key);
+    }
+```
+
+and
+
+``` java
+    @OnClick(R.id.home_button)
+    public void goToOtherView(View view) {
+        MainActivity.get(view.getContext()).navigateTo(OtherKey.create()); // using getSystemService()
+    }
+```
+
+- **Activity**
+
+``` java
+public class MainActivity
+        extends AppCompatActivity
+        implements StateChanger {
+    private static final String TAG = "MainActivity";
+
+    @BindView(R.id.root)
+    ViewGroup root;
+
+    BackstackDelegate backstackDelegate;
+    FragmentStateChanger fragmentStateChanger;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        backstackDelegate = new BackstackDelegate(null);
+        backstackDelegate.onCreate(savedInstanceState, getLastCustomNonConfigurationInstance(),
+                                   HistoryBuilder.single(HomeKey.create()));
+        backstackDelegate.registerForLifecycleCallbacks(this);
+
+        super.onCreate(savedInstanceState);
+
+        setContentView(R.layout.activity_main);
+        ButterKnife.bind(this);
+        // ...
+        fragmentStateChanger = new FragmentStateChanger(getSupportFragmentManager(), R.id.root);
+        backstackDelegate.setStateChanger(this);
+    }
+
+    @Override
+    public Object onRetainCustomNonConfigurationInstance() {
+        return backstackDelegate.onRetainCustomNonConfigurationInstance();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if(!backstackDelegate.onBackPressed()) {
+            super.onBackPressed();
+        }
+    }
+
+    // ...
+
+    @Override
+    public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
+        if(stateChange.topNewState().equals(stateChange.topPreviousState())) {
+            completionCallback.stateChangeComplete();
+            return;
+        }
+        fragmentStateChanger.handleStateChange(stateChange);
+        completionCallback.stateChangeComplete();
+    }
+}
+```
+
+- **Key** for Fragments
+
+``` java
+@AutoValue
+public abstract class HomeKey 
+      extends BaseKey { // see sample for BaseKey/BaseFragment
+    public static HomeKey create() {
+        return new AutoValue_HomeKey();
+    }
+
+    @Override
+    protected BaseFragment createFragment() {
+        return new HomeFragment();
+    }
+}
+```
+
+- **FragmentStateChanger**
+
+For `FragmentStateChanger`, see the example [here](https://github.com/Zhuinden/simple-stack/blob/504b2c44295c77a960ca34add68fdc685c3dbc19/simple-stack-example-basic-fragment/src/main/java/com/zhuinden/navigationexamplefrag/FragmentStateChanger.java).
+
+### Custom Views
 
 - **Activity**
 
@@ -184,32 +289,9 @@ public class FirstView
 }
 ```
 
-## Structure
+## More information
 
-- [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java): exposes operators for manipulating the backstack, and stores current history.
-
-- [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java): delegate class to hide Activity lifecycle integration, and provide view state persistence using `BackstackManager`.
-
-- [BackstackManager](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackManager.java): provides view-state and backstack history persistence.
-
-- [Bundleable](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Bundleable.java): interface that allows you to persist state directly from a custom View into a [StateBundle](https://github.com/Zhuinden/state-bundle/), using the delegate.
-
-- [HistoryBuilder](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/HistoryBuilder.java): Convenience class for building `ArrayList<Object>`.
-
-- [KeyContextWrapper](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/KeyContextWrapper.java): enables the ability to use `KeyContextWrapper.getKey(context)` or `Backstack.getKey(context)` to obtain key parameter in custom viewgroup.
-
-- [KeyParceler](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/KeyParceler.java): used for defining custom parcellation strategy if keys are not `Parcelable` by default.
-
-- [PendingStateChange](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/PendingStateChange.java): represents a change that will occur when possible.
-
-- [StateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChanger.java): interface for a class that listens to changes inside the Backstack.
-
-- [StateChange](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChange.java): represents a state change inside the backstack, providing previous state, new state, and the direction of the change.
-
-- [StateChanger.Callback](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChange.java): the callback that signals to the backstack that the state change is complete.
-
-- [SavedState](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/SavedState.java): contains the key, the view state and an optional Bundle. It is used for view state persistence.
-
+For more information, check the [wiki page](https://github.com/Zhuinden/simple-stack/wiki).
 
 
 ## License

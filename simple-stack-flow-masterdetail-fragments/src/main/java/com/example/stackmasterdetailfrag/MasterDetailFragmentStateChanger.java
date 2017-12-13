@@ -10,6 +10,8 @@ import com.example.stackmasterdetailfrag.paths.MasterDetailPath;
 import com.example.stackmasterdetailfrag.paths.NoDetailsPath;
 import com.zhuinden.simplestack.StateChange;
 
+import java.util.List;
+
 /**
  * Created by Zhuinden on 2017.02.12..
  */
@@ -44,9 +46,10 @@ public class MasterDetailFragmentStateChanger {
             removeFragment(fragmentTransaction, NoDetailsPath.create());
         }
 
-        for(Object _previousKey : stateChange.getPreviousState()) {
-            Path previousKey = (Path) _previousKey;
-            if(!stateChange.getNewState().contains(_previousKey)) {
+        List<Path> previousState = stateChange.getPreviousState();
+        List<Path> newState = stateChange.getNewState();
+        for(Path previousKey : previousState) {
+            if(!newState.contains(previousKey)) {
                 removeFragment(fragmentTransaction, previousKey);
             } else {
                 if(!previousKey.equals(masterKey) && !previousKey.equals(detailKey)) {
@@ -69,8 +72,7 @@ public class MasterDetailFragmentStateChanger {
             }
         }
 
-        for(Object _newKey : stateChange.getNewState()) {
-            Path newKey = (Path) _newKey;
+        for(Path newKey : stateChange.<Path>getNewState()) {
             if(!newKey.equals(masterKey) && !newKey.equals(detailKey)) {
                 detachFragment(fragmentTransaction, newKey);
             }

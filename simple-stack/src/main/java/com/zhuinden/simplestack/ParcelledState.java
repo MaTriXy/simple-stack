@@ -1,3 +1,18 @@
+/*
+ * Copyright 2017 Gabor Varadi
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.zhuinden.simplestack;
 
 import android.os.Parcel;
@@ -15,6 +30,7 @@ class ParcelledState
     Parcelable parcelableKey;
     SparseArray<Parcelable> viewHierarchyState;
     StateBundle bundle;
+    StateBundle viewBundle;
 
     ParcelledState() {
     }
@@ -26,6 +42,10 @@ class ParcelledState
         boolean hasBundle = in.readByte() > 0;
         if(hasBundle) {
             bundle = in.readParcelable(getClass().getClassLoader());
+        }
+        boolean hasViewBundle = in.readByte() > 0;
+        if(hasViewBundle) {
+            viewBundle = in.readParcelable(getClass().getClassLoader());
         }
     }
 
@@ -55,6 +75,10 @@ class ParcelledState
         dest.writeByte(bundle != null ? (byte) 0x01 : 0x00);
         if(bundle != null) {
             dest.writeParcelable(bundle, 0);
+        }
+        dest.writeByte(viewBundle != null ? (byte) 0x01 : 0x00);
+        if(viewBundle != null) {
+            dest.writeParcelable(viewBundle, 0);
         }
     }
 }

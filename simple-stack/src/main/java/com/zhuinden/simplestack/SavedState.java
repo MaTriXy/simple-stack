@@ -16,32 +16,33 @@
 package com.zhuinden.simplestack;
 
 import android.os.Parcelable;
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
 import android.util.SparseArray;
 
 import com.zhuinden.statebundle.StateBundle;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
 /**
  * A container for the view hierarchy state and an optional Bundle.
- * Made to be used with {@link BackstackDelegate}'s view state persistence.
  *
- * A {@link SavedState} represents the state of the view that is bound to a given key.
+ * A {@link SavedState} represents the state of the screen that is bound to a given key.
  */
 public class SavedState {
     private Object key;
     private SparseArray<Parcelable> viewHierarchyState;
     private StateBundle bundle;
+    private StateBundle viewBundle;
 
     private SavedState() {
     }
 
-    @NonNull
+    @Nonnull
     public Object getKey() {
         return key;
     }
 
-    @NonNull
+    @Nonnull
     public SparseArray<Parcelable> getViewHierarchyState() {
         return viewHierarchyState;
     }
@@ -55,8 +56,17 @@ public class SavedState {
         return bundle;
     }
 
-    public void setBundle(@Nullable StateBundle bundle) {
+    @Nullable
+    StateBundle getViewBundle() {
+        return viewBundle;
+    }
+
+    public void setBundle(@Nullable StateBundle bundle) { // should be non-null
         this.bundle = bundle;
+    }
+
+    void setViewBundle(@Nullable StateBundle viewBundle) {
+        this.viewBundle = viewBundle;
     }
 
     public static Builder builder() {
@@ -71,12 +81,13 @@ public class SavedState {
     public static class Builder {
         private Object key;
         private SparseArray<Parcelable> viewHierarchyState = new SparseArray<>();
-        private StateBundle bundle;
+        private StateBundle bundle = new StateBundle();
+        private StateBundle viewBundle;
 
         Builder() {
         }
 
-        public Builder setKey(@NonNull Object key) {
+        public Builder setKey(@Nonnull Object key) {
             if(key == null) {
                 throw new IllegalArgumentException("Key cannot be null");
             }
@@ -84,7 +95,7 @@ public class SavedState {
             return this;
         }
 
-        public Builder setViewHierarchyState(@NonNull SparseArray<Parcelable> viewHierarchyState) {
+        public Builder setViewHierarchyState(@Nonnull SparseArray<Parcelable> viewHierarchyState) {
             if(viewHierarchyState == null) {
                 throw new IllegalArgumentException("Provided sparse array for view hierarchy state cannot be null");
             }
@@ -92,8 +103,13 @@ public class SavedState {
             return this;
         }
 
-        public Builder setBundle(@Nullable StateBundle bundle) {
+        public Builder setBundle(@Nullable StateBundle bundle) {  // should be non-null
             this.bundle = bundle;
+            return this;
+        }
+
+        Builder setViewBundle(@Nullable StateBundle viewBundle) {
+            this.viewBundle = viewBundle;
             return this;
         }
 
@@ -105,6 +121,7 @@ public class SavedState {
             savedState.key = key;
             savedState.viewHierarchyState = viewHierarchyState;
             savedState.bundle = bundle;
+            savedState.viewBundle = viewBundle;
             return savedState;
         }
     }
@@ -117,7 +134,7 @@ public class SavedState {
         if(!(obj instanceof SavedState)) {
             return false;
         }
-        return ((SavedState)obj).getKey().equals(this.key);
+        return ((SavedState) obj).getKey().equals(this.key);
     }
 
     @Override

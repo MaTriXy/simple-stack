@@ -1,30 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="GradleMigrationSettings" migrationVersion="1" />
   <component name="GradleSettings">
     <option name="linkedExternalProjectsSettings">
       <GradleProjectSettings>
-        <option name="distributionType" value="DEFAULT_WRAPPED" />
         <option name="externalProjectPath" value="$PROJECT_DIR$" />
-        <option name="gradleJvm" value="#JAVA_HOME" />
+        <option name="gradleJvm" value="#GRADLE_LOCAL_JAVA_HOME" />
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/samples" />
+            <option value="$PROJECT_DIR$/samples/advanced-samples" />
+            <option value="$PROJECT_DIR$/samples/advanced-samples/extensions-compose-example" />
+            <option value="$PROJECT_DIR$/samples/advanced-samples/extensions-example" />
+            <option value="$PROJECT_DIR$/samples/advanced-samples/mvvm-sample" />
+            <option value="$PROJECT_DIR$/samples/basic-samples" />
+            <option value="$PROJECT_DIR$/samples/basic-samples/simple-stack-example-basic-java-fragment" />
+            <option value="$PROJECT_DIR$/samples/basic-samples/simple-stack-example-basic-java-view" />
+            <option value="$PROJECT_DIR$/samples/basic-samples/simple-stack-example-basic-kotlin-fragment" />
+            <option value="$PROJECT_DIR$/samples/basic-samples/simple-stack-example-basic-kotlin-view" />
+            <option value="$PROJECT_DIR$/samples/community-samples" />
+            <option value="$PROJECT_DIR$/samples/community-samples/simple-stack-example-kotlin-community-sample" />
+            <option value="$PROJECT_DIR$/samples/legacy-samples" />
+            <option value="$PROJECT_DIR$/samples/legacy-samples/simple-stack-example-multistack-fragment" />
+            <option value="$PROJECT_DIR$/samples/legacy-samples/simple-stack-example-multistack-view" />
+            <option value="$PROJECT_DIR$/samples/multistack-samples" />
+            <option value="$PROJECT_DIR$/samples/multistack-samples/simple-stack-example-multistack-nested-fragment" />
+            <option value="$PROJECT_DIR$/samples/scoping-samples" />
+            <option value="$PROJECT_DIR$/samples/scoping-samples/simple-stack-example-scoping-java" />
+            <option value="$PROJECT_DIR$/samples/scoping-samples/simple-stack-example-scoping-kotlin" />
+            <option value="$PROJECT_DIR$/samples/shared-element-samples" />
+            <option value="$PROJECT_DIR$/samples/shared-element-samples/simple-stack-example-sharedelement-fragment" />
             <option value="$PROJECT_DIR$/simple-stack" />
-            <option value="$PROJECT_DIR$/simple-stack-example-basic-fragment" />
-            <option value="$PROJECT_DIR$/simple-stack-example-basic-view" />
-            <option value="$PROJECT_DIR$/simple-stack-example-conductor" />
-            <option value="$PROJECT_DIR$/simple-stack-example-kotlin" />
-            <option value="$PROJECT_DIR$/simple-stack-example-multistack" />
-            <option value="$PROJECT_DIR$/simple-stack-example-mvp-fragments" />
-            <option value="$PROJECT_DIR$/simple-stack-example-mvp-view" />
-            <option value="$PROJECT_DIR$/simple-stack-example-mvvm-fragments" />
-            <option value="$PROJECT_DIR$/simple-stack-example-sharedelement-fragment" />
-            <option value="$PROJECT_DIR$/simple-stack-flow-masterdetail" />
-            <option value="$PROJECT_DIR$/simple-stack-flow-masterdetail-fragments" />
-            <option value="$PROJECT_DIR$/simple-stack-mortar-sample" />
+            <option value="$PROJECT_DIR$/tutorials" />
+            <option value="$PROJECT_DIR$/tutorials/tutorial-sample" />
           </set>
         </option>
-        <option name="resolveModulePerSourceSet" value="false" />
+        <option name="resolveExternalAnnotations" value="false" />
       </GradleProjectSettings>
     </option>
   </component>

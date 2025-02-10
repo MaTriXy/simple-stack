@@ -1,302 +1,422 @@
+![featured](https://androidweekly.net/issues/issue-489/badge)
+[![License](https://img.shields.io/github/license/Zhuinden/simple-stack.svg?style=flat)](https://www.apache.org/licenses/LICENSE-2.0)
+[![](https://jitpack.io/v/Zhuinden/simple-stack.svg)](https://jitpack.io/#Zhuinden/simple-stack)
+
+![simple-stack](simple-stack-logo.png)
+
 # Simple Stack
 
-Similarly to [square/flow](https://github.com/square/flow), Simple Stack allows you to represent your application state in a list of immutable data classes.
+## Why do I want this?
 
-The library also allows easy backstack persisting through a delegate class, which handles configuration changes and process death.
+To make navigation to another screen as simple as `backstack.goTo(SomeScreen())`, and going back as simple as `backstack.goBack()`.
 
-If your data classes are not `Parcelable` by default, then you can specify a custom parcellation strategy using `setKeyParceler()`.
+No more `FragmentTransaction`s in random places. Predictable and customizable navigation in a single location.
 
-Additionally, the library also allows you to persist state of custom viewgroups that are associated with a given UI state into a `StateBundle`.
+## What is Simple Stack?
 
-This way, you can easily create a single-Activity application using either views, fragments, or whatevers.
+Simple Stack is a backstack library (or technically, a navigation framework) that allows you to represent your navigation state in a list of immutable, parcelable data classes ("keys").
 
-## Operators
+This allows preserving your navigation history across configuration changes and process death - this is handled automatically.
 
-The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) provides 3 primary operators for manipulating state.
+Each screen can be associated with a scope, or a shared scope - to easily share data between screens.
 
-- `goTo()`: if state does not previously exist in the backstack, then adds it to the stack. Otherwise navigate back to given state.
-- `goBack()`: returns boolean if [StateChange](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChange.java) is in progress, or if there are more than 1 entries in history (and handled the back press). Otherwise, return false.
-- `setHistory()`: sets the state to the provided elements, with the direction that is specified.
-
-The secondary operators are:
-
-- `replaceTop()`: removes the current top element, and replaces it with the newly provided one.
-- `goUp()`: navigates back to the element if exists, replaces current top with it if does not.
-- `goUpChain()`: goes up to the parent chain if exists completely, replaces current with the chain if partially exists (while re-ordering existing duplicates to match the provided chain), and replaces current with chain if doesn't exist.
-
-## What does it do?
-
-The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) stores the screens.
-
-The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) also allows navigation between the states (works as a router), and enables handling this state change using the [StateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChanger.java).
-
-The library also provides two ways to handle both view-state persistence for views associated with a key, and persisting the keys across configuration change / process death.
-
-- The [Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java), which uses the [BackstackHost](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/BackstackHost.java) retained fragment (API 11+) to automatically receive the lifecycle callbacks, and survive configuration change.
-
-- The [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java), which works via manual Activity lifecycle callbacks - typically needed only for fragments.
-
-Internally, both the [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java) and the [Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java) uses a [BackstackManager](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackManager.java), which can also be used.
-
------------
-
-The library provides a [DefaultStateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/DefaultStateChanger.java), which by default uses [Navigator]([Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java)) to handle the persistence.
-
-The keys used by a [DefaultStateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/DefaultStateChanger.java) must implement [StateKey](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/StateKey.java), which expects a layout key and a view change handler.
+This simplifies navigation and state management within an Activity using either fragments, views, or whatever else.
 
 ## Using Simple Stack
 
-In order to use Simple Stack, you need to add jitpack to your project root gradle:
+In order to use Simple Stack, you need to add `jitpack` to your project root `build.gradle.kts`
+(or `build.gradle`):
 
-    buildscript {
-        repositories {
-            // ...
-            maven { url "https://jitpack.io" }
-        }
+``` kotlin
+// build.gradle.kts
+allprojects {
+    repositories {
         // ...
+        maven { setUrl("https://jitpack.io") }
     }
-    allprojects {
-        repositories {
-            // ...
-            maven { url "https://jitpack.io" }
-        }
-        // ...
-    }
-
-
-and add the compile dependency to your module level gradle.
-
-    compile 'com.github.Zhuinden:simple-stack:1.8.0'
-
-## How does it work?
-
-The [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) must be initialized with at least one initial state, and a [StateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChanger.java) must be set when it is able to handle the state change.
-
-The [BackstackManager](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackManager.java) is provided to handle state persistence.
-
-Convenience classes [BackstackDelegate](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackDelegate.java) and [Navigator](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/navigator/Navigator.java) are provided to help integration of the [BackstackManager](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/BackstackManager.java).
-
-Setting a [StateChanger](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChanger.java) begins an `initialization` (in Flow terms, a bootstrap traversal), which provides a [StateChange](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/StateChange.java) in form of `{[], [{...}, {...}]}` (meaning the previous state is empty, the new state is the initial keys).
-
-This allows you to initialize your views according to your current state.
-
-Afterwards, the [Backstack](https://github.com/Zhuinden/simple-stack/blob/master/simple-stack/src/main/java/com/zhuinden/simplestack/Backstack.java) operators allow changing between states.
-
-## Example code
-
-### Fragments
-
-Check out the details in [simple-stack-example-basic-fragment](https://github.com/Zhuinden/simple-stack/tree/master/simple-stack-example-basic-fragment) to see how to make Simple-Stack work with Fragments (or the relevant wiki page).
-
-- **End result**
-
-``` java
-    public void navigateTo(Object key) {
-        backstackDelegate.getBackstack().goTo(key);
-    }
-```
-
-and
-
-``` java
-    @OnClick(R.id.home_button)
-    public void goToOtherView(View view) {
-        MainActivity.get(view.getContext()).navigateTo(OtherKey.create()); // using getSystemService()
-    }
-```
-
-- **Activity**
-
-``` java
-public class MainActivity
-        extends AppCompatActivity
-        implements StateChanger {
-    private static final String TAG = "MainActivity";
-
-    @BindView(R.id.root)
-    ViewGroup root;
-
-    BackstackDelegate backstackDelegate;
-    FragmentStateChanger fragmentStateChanger;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        backstackDelegate = new BackstackDelegate(null);
-        backstackDelegate.onCreate(savedInstanceState, getLastCustomNonConfigurationInstance(),
-                                   HistoryBuilder.single(HomeKey.create()));
-        backstackDelegate.registerForLifecycleCallbacks(this);
-
-        super.onCreate(savedInstanceState);
-
-        setContentView(R.layout.activity_main);
-        ButterKnife.bind(this);
-        // ...
-        fragmentStateChanger = new FragmentStateChanger(getSupportFragmentManager(), R.id.root);
-        backstackDelegate.setStateChanger(this);
-    }
-
-    @Override
-    public Object onRetainCustomNonConfigurationInstance() {
-        return backstackDelegate.onRetainCustomNonConfigurationInstance();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if(!backstackDelegate.onBackPressed()) {
-            super.onBackPressed();
-        }
-    }
-
     // ...
+}
+```
 
-    @Override
-    public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
-        if(stateChange.topNewState().equals(stateChange.topPreviousState())) {
-            completionCallback.stateChangeComplete();
-            return;
+or
+
+``` groovy
+// build.gradle
+allprojects {
+    repositories {
+        // ...
+        maven { url "https://jitpack.io" }
+    }
+    // ...
+}
+```
+
+In newer projects, you need to also update the `settings.gradle` file's `dependencyResolutionManagement` block:
+
+```
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }  // <--
+        jcenter() // Warning: this repository is going to shut down soon
+    }
+}
+```
+
+and then, add the dependency to your module's `build.gradle.kts` (or `build.gradle`):
+
+``` kotlin
+// build.gradle.kts
+implementation("com.github.Zhuinden:simple-stack:2.9.0")
+implementation("com.github.Zhuinden:simple-stack-extensions:2.3.4")
+```
+
+or
+
+``` groovy
+// build.gradle
+implementation 'com.github.Zhuinden:simple-stack:2.9.0'
+implementation 'com.github.Zhuinden:simple-stack-extensions:2.3.4'
+```
+
+## How do I use it?
+
+You can check out [**the
+tutorials**](https://github.com/Zhuinden/simple-stack/tree/611e8c7db738a776156b8f709db22b8e37413221/tutorials) for
+simple examples.
+
+## Fragments
+
+With Fragments, in `AHEAD_OF_TIME` back handling mode to support predictive back gesture (along
+with `android:enableBackInvokedCallback`), the Activity code looks like this:
+
+- **With** simple-stack-extensions:lifecycle-ktx
+
+```kotlin
+class MainActivity : AppCompatActivity(), SimpleStateChanger.NavigationHandler {
+    private lateinit var fragmentStateChanger: FragmentStateChanger
+    private lateinit var backstack: Backstack
+
+    private val backPressedCallback = object : OnBackPressedCallback(false) { // <-- !
+        override fun handleOnBackPressed() {
+            backstack.goBack()
         }
-        fragmentStateChanger.handleStateChange(stateChange);
-        completionCallback.stateChangeComplete();
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContentView(R.layout.main_activity)
+
+        onBackPressedDispatcher.addCallback(backPressedCallback) // <-- !
+
+        fragmentStateChanger = FragmentStateChanger(supportFragmentManager, R.id.container)
+
+        backstack = Navigator.configure()
+            .setBackHandlingModel(BackHandlingModel.AHEAD_OF_TIME) // <-- !
+            .setStateChanger(SimpleStateChanger(this))
+            .install(this, binding.container, History.single(HomeKey))
+
+        backPressedCallback.isEnabled = backstack.willHandleAheadOfTimeBack() // <-- !
+        backstack.observeAheadOfTimeWillHandleBackChanged(this, backPressedCallback::isEnabled::set) // <-- ! from lifecycle-ktx
+    }
+    
+    override fun onNavigationEvent(stateChange: StateChange) {
+        fragmentStateChanger.handleStateChange(stateChange)
     }
 }
 ```
 
-- **Key** for Fragments
+- **Without** simple-stack-extensions:lifecycle-ktx
 
-``` java
-@AutoValue
-public abstract class HomeKey 
-      extends BaseKey { // see sample for BaseKey/BaseFragment
-    public static HomeKey create() {
-        return new AutoValue_HomeKey();
+```kotlin
+class MainActivity : AppCompatActivity(), SimpleStateChanger.NavigationHandler {
+    private lateinit var fragmentStateChanger: FragmentStateChanger
+    private lateinit var backstack: Backstack
+
+    private val backPressedCallback = object : OnBackPressedCallback(false) { // <-- !
+        override fun handleOnBackPressed() {
+            backstack.goBack()
+        }
     }
 
-    @Override
-    protected BaseFragment createFragment() {
-        return new HomeFragment();
+    private val updateBackPressedCallback = AheadOfTimeWillHandleBackChangedListener { // <-- !
+        backPressedCallback.isEnabled = it // <-- !
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContentView(R.layout.main_activity)
+
+        onBackPressedDispatcher.addCallback(backPressedCallback) // <-- !
+
+        fragmentStateChanger = FragmentStateChanger(supportFragmentManager, R.id.container)
+
+        backstack = Navigator.configure()
+            .setBackHandlingModel(BackHandlingModel.AHEAD_OF_TIME) // <-- !
+            .setStateChanger(SimpleStateChanger(this))
+            .install(this, binding.container, History.single(HomeKey))
+
+        backPressedCallback.isEnabled = backstack.willHandleAheadOfTimeBack() // <-- !
+        backstack.addAheadOfTimeWillHandleBackChangedListener(updateBackPressedCallback) // <-- !
+    }
+
+    override fun onDestroy() {
+        backstack.removeAheadOfTimeWillHandleBackChangedListener(updateBackPressedCallback); // <-- !
+        super.onDestroy()
+    }
+
+    override fun onNavigationEvent(stateChange: StateChange) {
+        fragmentStateChanger.handleStateChange(stateChange)
     }
 }
 ```
 
-- **FragmentStateChanger**
+With targetSdkVersion 34 and with `android:enableOnBackInvokedCallback="true"` enabled, `onBackPressed` (
+and `KEYCODE_BACK`) will no longer be called. In that case, the `AHEAD_OF_TIME` back handling model should be preferred.
 
-For `FragmentStateChanger`, see the example [here](https://github.com/Zhuinden/simple-stack/blob/504b2c44295c77a960ca34add68fdc685c3dbc19/simple-stack-example-basic-fragment/src/main/java/com/zhuinden/navigationexamplefrag/FragmentStateChanger.java).
+## Screens
 
-### Custom Views
+`FirstScreen` looks like this (assuming you have `data object` enabled):
 
-- **Activity**
+```groovy
+kotlinOptions {
+    jvmTarget = "1.8"
+    languageVersion = '1.9' // data objects, 1.8 in 1.7.21, 1.9 in 1.8.10
+}
 
-``` java
-public class MainActivity
-        extends AppCompatActivity {
-    public static final String TAG = "MainActivity";
+kotlin.sourceSets.all {
+    languageSettings.enableLanguageFeature("DataObjects")
+}
+```
 
-    @BindView(R.id.root)
-    RelativeLayout root;
+```kotlin
+// no args
+@Parcelize
+data object FirstScreen : DefaultFragmentKey() {
+    override fun instantiateFragment(): Fragment = FirstFragment()
+}
+```
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        ButterKnife.bind(this);
+If you don't have `data object` support yet, then no-args keys look like this (to ensure stable
+hashCode/equals/toString):
 
-        Navigator.install(this, root, HistoryBuilder.single(FirstKey.create()));
-        // additional configuration possible with `Navigator.configure()...install()`
+``` kotlin
+// no args
+@Parcelize
+data class FirstScreen(private val noArgsPlaceholder: String = ""): DefaultFragmentKey() {
+    override fun instantiateFragment(): Fragment = FirstFragment()
+}
+
+// has args
+@Parcelize
+data class FirstScreen(
+    val username: String, 
+    val password: String,
+): DefaultFragmentKey() {
+    override fun instantiateFragment(): Fragment = FirstFragment()
+}
+```
+
+And `FirstFragment` looks like this:
+
+``` kotlin
+class FirstFragment: KeyedFragment(R.layout.first_fragment) {
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        val key: FirstScreen = getKey() // params
     }
+}
+```
 
-    @Override
-    public void onBackPressed() {
-        if(!Navigator.onBackPressed(this)) {
-            super.onBackPressed();
+After which going to the second screen is as simple as `backstack.goTo(SecondScreen())`.
+
+
+## Scopes
+
+To simplify sharing data/state between screens, a screen key can implement `ScopeKey`.
+
+The scope is described with a String tag, and services bound to that scope can be configured via `ScopedServices`.
+
+Services bound to a `ServiceBinder` get lifecycle callbacks: `ScopedServices.Registered`, `ScopedServices.Activated`, or `Bundleable`.
+
+This lets you easily share a class between screens, while still letting you handle Android's lifecycles seamlessly.
+
+Using the `simple-stack-extensions`, this can be simplified using the `DefaultServiceProvider`. 
+
+It looks like this:
+
+``` kotlin
+Navigator.configure()
+    .setScopedServices(DefaultServiceProvider())
+    /* ... */
+```
+
+And then:
+
+
+``` kotlin
+@Parcelize // typically data class
+data object FirstScreen: DefaultFragmentKey(), DefaultServiceProvider.HasServices {
+    override fun instantiateFragment(): Fragment = FirstFragment()
+
+    override fun getScopeTag() = toString()
+
+    override fun bindServices(serviceBinder: ServiceBinder) {
+        with(serviceBinder) {
+            add(FirstScopedModel())
         }
     }
 }
+
+class FirstScopedModel : Bundleable, ScopedServices.Registered { // interfaces are optional
+    ...
+}
+
+class FirstFragment : KeyedFragment(R.layout.first_fragment) {
+    private val firstModel by lazy { lookup<FirstScopedModel>() }
+
+    ...
+}
+
+class SecondFragment : KeyedFragment(R.layout.second_fragment) {
+    private val firstModel by lazy { lookup<FirstScopedModel>() } // <- available if FirstScreen is in the backstack
+
+    ...
+}
 ```
 
-- **StateKey**
+And `FirstScopedModel` is shared between two screens.
+
+Any additional shared scopes on top of screen scopes can be defined using `ScopeKey.Child`.
+
+## What are additional benefits?
+
+Making your navigation state explicit means you're in control of your application.
+
+Instead of hacking around with the right fragment transaction tags, or calling `NEW_TASK | CLEAR_TASK` and making the screen flicker - you can just say `backstack.setHistory(History.of(SomeScreen(), OtherScreen())` and that is now your active navigation history.
+
+Using `Backstack` to navigate allows you to move navigation responsibilities out of your view layer. No need to run FragmentTransactions directly in a click listener each time you want to move to a different screen. No need to mess around with  `LiveData<Event<T>>` or `SingleLiveData` to get your "view" to decide what state your app should be in either.
 
 ``` java
-@AutoValue
-public abstract class FirstKey
-        implements StateKey, Parcelable {
-    public static FirstKey create() {
-        return new AutoValue_FirstKey();
-    }
-
-    @Override
-    public int layout() {
-        return R.layout.path_first;
-    }
-
-    @Override
-    public ViewChangeHandler viewChangeHandler() {
-        return new SegueViewChangeHandler();
+class FirstScopedModel(private val backstack: Backstack) {
+    fun doSomething() {
+        // ...
+        backstack.goTo(SecondScreen)
     }
 }
 ```
 
-- **Layout XML**
-
-``` xml
-<?xml version="1.0" encoding="utf-8"?>
-<com.zhuinden.simplestackdemoexample.FirstView xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:gravity="center"
-              android:orientation="vertical">
-
-    <EditText
-        android:id="@+id/first_edittext"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:hint="Enter text here"/>
-
-    <Button
-        android:id="@+id/first_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Go to second!"/>
-
-</com.zhuinden.simplestackdemoexample.FirstView>
-```
-
-- **Custom Viewgroup**
+Another additional benefit is that your navigation history can be unit tested.
 
 ``` java
-public class FirstView
-        extends LinearLayout { // can implement Bundleable
+assertThat(backstack.getHistory()).containsExactly(SomeScreen, OtherScreen)
+```
 
-    public FirstView(Context context) {
-        super(context);
-    }
+And most importantly, navigation (swapping screens) happens in one place, and you are in direct control of what happens in such a scenario. By writing a `StateChanger`, you can set up "how to display my current navigation state" in any way you want. No more `((MainActivity)getActivity()).setTitleText("blah");` inside Fragment's `onStart()`.
 
-    public FirstView(Context context, AttributeSet attrs) {
-        super(context, attrs);
-    }
+Write once, works in all cases.
 
-    //...
+``` java
+override fun onNavigationEvent(stateChange: StateChange) { // using SimpleStateChanger
+    val newScreen = stateChange.topNewKey<MyScreen>() // use your new navigation state
 
-    @OnClick(R.id.first_button)
-    public void firstButtonClick(View view) {
-        Navigator.getBackstack(view.getContext()).goTo(SecondKey.create());
-    }
+    setTitle(newScreen.title);
 
-    @Override
-    protected void onFinishInflate() {
-        super.onFinishInflate();
-        ButterKnife.bind(this);
-    }
+    ... // set up fragments, set up views, whatever you want
 }
 ```
+
+Whether you navigate forward or backward, or you rotate the screen, or you come back after low memory condition - it's
+irrelevant. The `StateChanger` will ***always*** handle the scenario in a predictable way.
+
+## Dev Talk about Simple-Stack
+
+For an overview of the "why" and the "what" of what Simple-Stack offers, you can check
+out [this talk called `Simplified Single-Activity Apps using Simple-Stack`](https://www.youtube.com/watch?v=5ACcin1Z2HQ)
+.
+
+## Tutorial by Ryan Kay
+
+For a quick tutorial on how to set up dependency injection, model lifecycles, and reactive state management using
+Simple-Stack, you can look at the tutorial by Ryan Michael Kay [**here, by clicking this
+link**](https://youtu.be/yRVt6sALB-g?t=2600).)
 
 ## More information
 
 For more information, check the [wiki page](https://github.com/Zhuinden/simple-stack/wiki).
 
+## What about Jetpack Compose?
+
+See https://github.com/Zhuinden/simple-stack-compose-integration/ for a default way to use composables as screens.
+
+This however is only required if ONLY composables are used, and NO fragments. When using Fragments, refer to the
+official [Fragment Compose interop](https://developer.android.com/jetpack/compose/interop/interop-apis#compose-in-fragments)
+guide.
+
+For Fragment + Simple-Stack + Compose integration, you can also
+check [the corresponding sample](https://github.com/Zhuinden/simple-stack/tree/ced6d11e711fa2dda85e3bd7813cb2a192f10396/samples/advanced-samples/extensions-compose-example)
+.
+
+## About the event-bubbling back handling model
+
+This section is provided for those who are transitioning from event-bubbling to the ahead-of-time back handling
+model (`OnBackPressedDispatcher`), but cannot use the ahead-of-time model yet (due to relying on `onBackPressed()` or `KEYCODE_BACK`).
+
+**Note:** Before supporting predictive back gestures and using `EVENT_BUBBLING` back handling model, the code that interops
+with OnBackPressedDispatcher looks like this:
+
+``` kotlin
+class MainActivity : AppCompatActivity(), SimpleStateChanger.NavigationHandler {
+    private lateinit var fragmentStateChanger: DefaultFragmentStateChanger
+
+    @Suppress("DEPRECATION")
+    private val backPressedCallback = object: OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            if (!Navigator.onBackPressed(this@MainActivity)) {
+                this.remove() 
+                onBackPressed() // this is the reliable way to handle back for now 
+                this@MainActivity.onBackPressedDispatcher.addCallback(this)
+            }
+        }
+    }
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        onBackPressedDispatcher.addCallback(backPressedCallback) // this is the reliable way to handle back for now
+
+        val binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        
+        fragmentStateChanger = DefaultFragmentStateChanger(supportFragmentManager, R.id.container)
+        
+        Navigator.configure()
+            .setStateChanger(SimpleStateChanger(this))
+            .install(this, binding.container, History.single(HomeKey))
+    }
+
+    override fun onNavigationEvent(stateChange: StateChange) {
+        fragmentStateChanger.handleStateChange(stateChange)
+    }
+}
+```
+
+To handle back previously, what you had to do is override `onBackPressed()` (then
+call `backstack.goBack()`, if it returned `true` then you would not call `super.onBackPressed()`) , but in order to
+support `BackHandler` in Compose, or Fragments that use `OnBackPressedDispatcher` internally, you cannot
+override `onBackPressed` anymore in a reliable manner.
+
+Now, either this should be used (if cannot migrate to `AHEAD_OF_TIME` back handling model), or migrate
+to `AHEAD_OF_TIME` back handling model and `AheadOfTimeBackCallback` (see example at the start of this readme).
 
 ## License
 
-    Copyright 2017 Gabor Varadi
+    Copyright 2017-2023 Gabor Varadi
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.

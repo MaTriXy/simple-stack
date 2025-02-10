@@ -1,13 +1,750 @@
 # Change log
 
--Simple Stack _._._ (__-__-__)
+-Simple Stack 2.9.0 (2024-05-06)
 --------------------------------
+
+- ADDED: `Backstack.goAppendChain(newKeys)` and `Backstack.goAppendChain(asReplace, newKeys)` which appends the provided keys to the end of
+  the current history.
+
+If any duplicates are provided, they will also be added to the end. If a key already exists in the history, it gets removed from earlier and
+appended to the end.
+
+If there are implicit parents used as the reorder occurs, please make sure that the scope hierarchy can still be rebuilt from left-to-right
+order. It might be preferred top use `ScopeKey.Child` instead of `ScopeKey` in these cases.
+
+- ADDED: `Backstack.findServices(serviceSearchMode)` and `Backstack.findServicesFromScope(scopeTag, serviceSearchMode)`.
+
+This allows for getting the services of a backstack (either only local services, or including parent services) that are accessible within
+the backstack.
+
+-Simple Stack 2.8.0 (2023-07-03)
+--------------------------------
+
+- ADDED: `Backstack.setParentServices(Backstack parentServices)`
+  , `Backstack.setParentServices(Backstack parentServices, String parentScopeTag)` and `Backstack.getParentServices()` (as per #239).
+
+When using `backstack.lookupService()`, `backstack.canFindService()`, `backstack.canFindFromScope()` and `backstack.lookupFromScope()`, then
+if parent services are set, it will attempt to lookup the service with ALL from either the full scope hierarchy, or from the scope provided
+as the `parentScopeTag`.
+
+Please note that `findScopesForKey()` is NOT affected, as it would drastically alter behavior. If you need this, you can collect it from the
+parent manually (which is partly why `getParentServices()` was added).
+
+-Simple Stack 2.7.0 (2023-03-31)
+--------------------------------
+
+- ***MAJOR FEATURE ADDITION***: Added `Backstack.setBackHandlingModel(BackHandlingModel.AHEAD_OF_TIME)` to
+  support `android:enableBackInvokedCallback="true"` on Android 14 for predictive back gesture support.
+
+- This also comes with a new artifact in `simple-stack-extensions 2.3.0` called `lifecycle-ktx`.
+
+With this, `Navigator.Installer.setBackHandlingModel()`, `BackstackDelegate.setBackHandlingModel()`,
+and `Backstack.setBackHandlingModel()` are added.
+
+Also, `ServiceBinder.getAheadOfTimeBackCallbackRegistry()` is added as a replacement for `ScopedServices.HandlesBack`.
+Please note that using it requires `AHEAD_OF_TIME` mode, and without it, trying to
+use `ServiceBinder.getAheadOfTimeBackCallbackRegistry()` throws an exception.
+
+Also, `Backstack.willHandleAheadOfTimeBack()`, `Backstack.addAheadOfTimeWillHandleBackChangedListener()`
+and `Backstack.removeAheadOfTimeWillHandleBackChangedListener()` are added.
+
+**IMPORTANT**:
+
+The `AHEAD_OF_TIME` back handling model must be enabled similarly to how `setScopedServices()` or other similar configs
+must be called before `backstack.setup()`, `Navigator.install()`, or `BackstackDelegate.onCreate()`.
+
+When `AHEAD_OF_TIME` is set, the behavior of `goBack()` changes. Calling `goBack()` when `willHandleAheadOfTimeBack()`
+returns false throws an exception.
+
+When `AHEAD_OF_TIME` is set, `ScopedServices.HandlesBack` will **no longer be called** (as it cannot return whether a
+service WILL handle back or not), and should be replaced with registrations to the `AheadOfTimeBackCallbackRegistry`.
+
+When `AHEAD_OF_TIME` is NOT set (and therefore the default, `EVENT_BUBBLING` is set),
+calling `willHandleAheadOfTimeBack` or `addAheadOfTimeWillHandleBackChangedListener`
+or `removeAheadOfTimeWillHandleBackChangedListener` throws an exception.
+
+To migrate to use the ahead-of-time back handling model, then you might have the previous
+somewhat `onBackPressedDispatcher`-compatible (but not predictive-back-gesture compatible) code:
+
+``` kotlin
+class MainActivity : AppCompatActivity(), SimpleStateChanger.NavigationHandler {
+    private lateinit var fragmentStateChanger: DefaultFragmentStateChanger
+
+    @Suppress("DEPRECATION")
+    private val backPressedCallback = object: OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            if (!Navigator.onBackPressed(this@MainActivity)) {
+                this.remove() 
+                onBackPressed() // this is the reliable way to handle back for now 
+                this@MainActivity.onBackPressedDispatcher.addCallback(this)
+            }
+        }
+    }
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        onBackPressedDispatcher.addCallback(backPressedCallback) // this is the reliable way to handle back for now
+
+        val binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        
+        fragmentStateChanger = DefaultFragmentStateChanger(supportFragmentManager, R.id.container)
+        
+        Navigator.configure()
+            .setStateChanger(SimpleStateChanger(this))
+            .install(this, binding.container, History.single(HomeKey))
+    }
+
+    override fun onNavigationEvent(stateChange: StateChange) {
+        fragmentStateChanger.handleStateChange(stateChange)
+    }
+}
+```
+
+This code changes to the following in order to support predictive back gesture using ahead-of-time model:
+
+```kotlin
+class MainActivity : AppCompatActivity(), SimpleStateChanger.NavigationHandler {
+    private lateinit var fragmentStateChanger: FragmentStateChanger
+
+    private lateinit var authenticationManager: AuthenticationManager
+
+    private lateinit var backstack: Backstack
+
+    private val backPressedCallback = object : OnBackPressedCallback(false) { // <-- !
+        override fun handleOnBackPressed() {
+            backstack.goBack()
+        }
+    }
+
+    private val updateBackPressedCallback = AheadOfTimeWillHandleBackChangedListener { // <-- !
+        backPressedCallback.isEnabled = it // <-- !
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContentView(R.layout.main_activity)
+
+        onBackPressedDispatcher.addCallback(backPressedCallback) // <-- !
+
+        fragmentStateChanger = FragmentStateChanger(supportFragmentManager, R.id.container)
+
+        backstack = Navigator.configure()
+            .setBackHandlingModel(BackHandlingModel.AHEAD_OF_TIME) // <-- !
+            .setStateChanger(SimpleStateChanger(this))
+            .install(this, binding.container, History.single(HomeKey))
+
+        backPressedCallback.isEnabled = backstack.willHandleAheadOfTimeBack() // <-- !
+        backstack.addAheadOfTimeWillHandleBackChangedListener(updateBackPressedCallback) // <-- !
+    }
+
+    override fun onDestroy() {
+        backstack.removeAheadOfTimeWillHandleBackChangedListener(updateBackPressedCallback); // <-- !
+        super.onDestroy()
+    }
+
+  override fun onNavigationEvent(stateChange: StateChange) {
+    fragmentStateChanger.handleStateChange(stateChange)
+  }
+}
+```
+
+Please make sure to remove the `AheadOfTimeWillHandleBackChangedListener` in `onDestroy` (Activity) or `onDestroyView` (
+Fragment), because the listener staying registered would be a memory leak.
+
+With the new `lifecycle-ktx` in `simple-stack-extensions` 2.3.0, this:
+
+```kotlin
+    backPressedCallback.isEnabled = backstack.willHandleAheadOfTimeBack() // <-- !
+    backstack.addAheadOfTimeWillHandleBackChangedListener(updateBackPressedCallback) // <-- !
+}
+
+override fun onDestroy() {
+    backstack.removeAheadOfTimeWillHandleBackChangedListener(updateBackPressedCallback); // <-- !
+```
+
+can be turned into this:
+
+```kotlin
+backPressedCallback.isEnabled = backstack.willHandleAheadOfTimeBack() // <-- !
+backstack.observeAheadOfTimeWillHandleBackChanged(this, backPressedCallback::isEnabled::set)
+```
+
+If you can't update to the `AHEAD_OF_TIME` back handling model, then don't worry, as backwards compatibility has been
+preserved with the previous behavior.
+
+When using `AHEAD_OF_TIME` back handling model, `ScopedServices.HandlesBack` is no longer called. To replace this, you
+might have had something like this:
+
+```kotlin
+class FragmentStackHost(
+  initialKey: Any
+) : Bundleable, ScopedServices.HandlesBack {
+    var isActiveForBack: Boolean = false
+    
+    // ...
+    
+    override fun onBackEvent(): Boolean {
+        if (isActiveForBack) {
+            return backstack.goBack()
+        } else {
+            return false
+        }
+    }
+}
+```
+
+This is replaced like so:
+
+```kotlin
+class FragmentStackHost(
+    initialKey: Any,
+    private val aheadOfTimeBackCallbackRegistry: AheadOfTimeBackCallbackRegistry,
+) : Bundleable, ScopedServices.Registered {
+    var isActiveForBack: Boolean = false
+        set(value) {
+            field = value
+            backCallback.isEnabled = value && backstackWillHandleBack
+        }
+
+    private var backstackWillHandleBack = false
+        set(value) {
+            field = value
+            backCallback.isEnabled = isActiveForBack && value
+        }
+
+    private val backCallback = object : AheadOfTimeBackCallback(false) {
+        override fun onBackReceived() {
+            backstack.goBack()
+        }
+    }
+
+    private val willHandleBackChangedListener = AheadOfTimeWillHandleBackChangedListener {
+        backstackWillHandleBack = it
+    }
+
+    init {
+        // ...
+        backstackWillHandleBack = backstack.willHandleAheadOfTimeBack()
+        backstack.addAheadOfTimeWillHandleBackChangedListener(willHandleBackChangedListener)
+    }
+
+  override fun onServiceRegistered() {
+    aheadOfTimeBackCallbackRegistry.registerAheadOfTimeBackCallback(backCallback)
+  }
+
+  override fun onServiceUnregistered() {
+    aheadOfTimeBackCallbackRegistry.unregisterAheadOfTimeCallback(backCallback)
+  }
+}
+```
+
+Where `FragmentStackHost` gets the `AheadOfTimeBackCallbackRegistry`
+from `serviceBinder.getAheadOfTimeBackCallbackRegistry()`.
+
+So in this snippet, whether back will be handled needs to be propagated up, and manage the enabled state of
+the `AheadOfTimeBackCallback` to intercept back if needed.
+
+While this might seem a bit tricky, this is how Google does it in their own micromanagement of communicating with
+the `onBackPressedDispatcher` as well, so evaluating ahead of time who will want to handle back later is unavoidable.
+
+- DEPRECATED: `BackstackDelegate.onBackPressed()` and `Navigator.onBackPressed()`. Not only are they the same
+  as `backstack.goBack()` and merely managed to confuse people historically, but this deprecation mirros the deprecation
+  of `onBackPressed` in compileSdk 33, to push towards using predictive back.
+
+-Simple Stack 2.6.5 (2022-11-11)
+--------------------------------
+
+- FIX: `Backstack.CompletionListener` added to `Backstack` that unregistered themselves during dispatching notifications
+  would cause either a ConcurrentModificationException or invalid results, this is now fixed and no longer the case (
+  #263, thanks @angusholder)
+
+- MINOR CHANGE: When `Backstack.CompletionListener`'s are being notified, the state changer is temporarily removed (
+  similarly to dispatching `ScopedServices.Activated` events), so that navigation actions invoked on `Backstack` are
+  deferred until all `Backstack.CompletionListener`s are notified.
+
+-Simple Stack 2.6.4 (2022-04-21)
+--------------------------------
+
+- FIX: Attempt at fixing a crash related to `LinkedHashMap.retainAll()` specifically on Android 6 and Android 6.1
+  devices (#256).
+
+- 2.6.3 had an issue with `maven-publish` and transitive dependencies were missing, and is therefore skipped.
+
+-Simple Stack 2.6.2 (2021-06-07)
+--------------------------------
+
+- ADDED: `Backstack.canSetScopeProviders()`.
+
+This is in conjunction with the 2.6.1 change, while making it safe to use them without extra checks such as `if(lastNonConfigurationInstance == null) {`.
+
+-Simple Stack 2.6.1 (2021-05-03)
+--------------------------------
+
+- CHANGE: `Backstack.setScopedServices(ScopedServices)`, `Backstack.setGlobalServices(GlobalServices)`, and `Backstack.setGlobalServices(GlobalServices.Factory)` can now be called after `setup()`, but before `setStateChanger()`.
+
+This allows setting the scoped services on the backstack instance, when using deferred initialization, before the initial state change is run.
+
+-Simple Stack 2.6.0 (2021-03-08)
+--------------------------------
+
+- ADD: `Backstack.addRetainedObject(objectTag, retainedObject)`, `Backstack.hasRetainedObject(objectTag)`, `Backstack.removeRetainedObject(objectTag)`, `Backstack.getRetainedObject(objectTag)`.
+
+This allows simpler way of persisting an object instance across configuration changes.
+
+Also, retained objects that implement `Bundleable` are given state restoration callbacks.
+
+- UPDATE: Add `simple-stack-example-multistack-nested-fragment` that shows how to create a fragment that has `Backstack`s for its child fragments, thus creating true multi-stack apps using nested backstacks.
+
+- DEPRECATED: `Backstack.addCompletionListener`, `Backstack.removeCompletionListener`, `Backstack.removeCompletionListeners`.
+
+These were the same as `addStateChangeCompletionListener` and `removeStateChangeCompletionListener`, and should not have been duplicate APIs.
+
+-Simple Stack 2.5.0 (2020-12-16)
+--------------------------------
+
+- ADD: `Backstack.exitScope(scopeTag)`, `Backstack.exitScope(scopeTag, direction)` and `Backstack.exitScopeTo(scopeTag, targetKey, direction)`.
+
+If a scope is found, the backstack now allows exiting from it. Providing a target allows exiting into a new target key.
+
+- ADD: `AsyncStateChanger` for convenience.
+
+Mirroring the addition of `SimpleStateChanger` for synchronous state changes, `AsyncStateChanger` is for async state changes (while still no longer having to remember checking for the same key being provided using `isTopNewKeyEqualToPrevious`).
+
+- UPDATE: `state-bundle` is updated to `1.4.0` (add a few missing `@Nullable`s that became platform types instead of nullables).
+
+-Simple Stack 2.4.0 (2020-07-08)
+--------------------------------
+- SIGNATURE CHANGE: `GlobalServices.Factory` now receives `Backstack` parameter in `create()`. (#231)
+
+I'm aware this is technically "breaking", but the effect should be minor, and hopefully shouldn't cause problems.`
+
+The `Backstack` cannot be added as a `service` directly, but it can be added as an `alias`.
+
+- FIX: `GlobalServices.Factory`'s `create()` method was non-null, but `@Nonnull` was missing.
+
+- MINOR FIX: Adding the `Backstack` from `serviceBinder.getBackstack()` with `addService()` would cause a loop in `toBundle()`. Now it explicitly throws `IllegalArgumentException` instead sooner (not reported before).
+
+- DEPRECATED: `backstack.removeAllStateChangeCompletionListeners()`. This was added "for convenience", but in reality it is not a good/safe API, and it should not exist.
+
+- UPDATE: Create and release `simple-stack-extensions` for default scoping and default fragment behaviors.
+
+- ADD: `GlobalServices.SCOPE_TAG` to make it possible to see the scope tag of global services without relying on internals.
+
+-Simple Stack 2.3.2 (2020-04-11)
+--------------------------------
+
+- FIX: Bug introduced in 2.3.1, using `backstack.removeAllStateChangeCompletionListeners()` would remove an internal completion listener and therefore scope activation callbacks would stop being dispatched. 
+
+-Simple Stack 2.3.1 (2020-03-31)
+--------------------------------
+
+- FIX: Ensure that if multiple navigation actions are enqueued, then scope activation dispatch only occurs for the final state change, instead of potentially running into an AssertionError. (#220, thanks @valeriyo)
+
+If you use either `ScopeKey` or `ScopeKey.Child`, it is advised to update, and get this bugfix.
+
+-Simple Stack 2.3.0 (2020-02-27)
+--------------------------------
+
+- CHANGE: Remove dependency on `android.support.annotation.*`. With that, there should be no dependency from the library on either `android.support.*` or `androidx.*`.
+
+Replaced it using `javax.annotation.Nullable` and `javax.annotation.Nonnull` provided by `api("com.google.code.findbugs:jsr305:3.0.2")`.
+
+- UPDATE: `state-bundle` is updated to `1.3.0` (Remove dependency on `android.support.annotation.*`, replace with `javax.annotation.*`).
+
+With these changes, Jetifier should no longer be needed when using Simple-Stack.
+
+-Simple Stack 2.2.5 (2020-02-18)
+--------------------------------
+
+- CHANGE: `Backstack.getSavedState(Object key).getBundle()` is now initialized to an empty `StateBundle` instead of `null` (but is still nullable because of `setBundle()`).
+
+- FIX: `Backstack.persistViewToState(Object key)` no longer creates a new `SavedState` instance, and uses `getSavedState` to re-use (or create) the existing one.
+
+- FIX: Ensure that `backDispatchedServices` is also cleared after execution of `dispatchBack`. 
+
+-Simple Stack 2.2.4 (2020-01-30)
+--------------------------------
+
+- UPDATE: `state-bundle` is updated to `1.2.2` (Fix a bug in `StateBundle.equals()`).
+
+-Simple Stack 2.2.3 (2020-01-23)
+--------------------------------
+
+- FIX: `ScopedService.Activated` callback could immediately execute a navigation action, which if destroyed the current scope, then it could result in an `AssertionError` (#215).
+
+- ADD: `SimpleStateChanger` for convenience when a `StateChanger` is not intended to take asynchronous execution into account. 
+
+-Simple Stack 2.2.2 (2020-01-17)
+--------------------------------
+
+- FIX: Ensure that unused services can be GCed inside ScopeManager (previously they could be kept alive in a map, #213).
+
+-Simple Stack 2.2.1 (2020-01-12)
+--------------------------------
+
+- FIX: The explicit parent scope chain was not always resolved correctly if a key is only a ScopeKey.Child, but not a ScopeKey, and the key did not register any new scopes (as all scopes defined by the ScopeKey.Child had already been registered by previous keys).
+
+This could provide incorrect results in `findScopesForKey(key, EXPLICIT)`, and could skip a `HandlesBack` service in the current top key's explicit parent chain.
+
+-Simple Stack 2.2.0 (2019-12-30)
+--------------------------------
+
+- ADDED: `ScopedService.HandlesBack`.
+
+When a service implements `HandlesBack`, then when `Backstack.goBack()` is called, it is first dispatched across the current active explicit scope chain.
+
+This allows handling "back", without having to dispatch it through the active view hierarchy (in order to get access to it in scoped services).
+
+- FIX: `Backstack.moveToTop()` did not re-order the scope hierarchy according to the new active keys (as the scope order depended on construction order, but existing scopes were not recreated).
+
+This could have been a problem if services used the same name across multiple scopes, and the keys were re-ordered in place (not add/remove).
+
+- ADDED: `Backstack.setGlobalServices(GlobalServices.Factory)` and its `BackstackDelegate`/`Navigator` equivalent.
+
+This allows delaying the instantiation of services when the global scope is actually being created, rather than providing them immediately.
+
+Please note that providing a `GlobalServices.Factory` will override whatever `GlobalServices` was previously set.
+
+Also note that the `GlobalServices.Factory` should not be an anonymous inner class / lambda / inner class, as it is kept for configuration changes.
+
+- DEPRECATED: `BackstackDelegate`.
+
+With the renaming of `BackstackManager` to `Backstack` in 2.0.x, it's become easier to use `Backstack` directly than juggling the `BackstackDelegate`.
+
+Also, using `Navigator` with Fragments seems to have no side-effects, therefore this is now the preferred approach (since setting a non-default state changer calls `setShouldPersistContainerChild(false)`, also since 2.0.x).
+
+Therefore, using `Navigator` is now preferred over `BackstackDelegate`.
+
+- FIX: `Backstack.forceClear()` now calls `finalizeScopes()` first to ensure that scoped services are also properly reset.
+
+-Simple Stack 2.1.2 (2019-10-10)
+--------------------------------
+
+- BEHAVIOR CHANGE: The navigation operations `goBack()`, `replaceTop()`, `jumpToRoot()`, `goUp()`, `goUpChain()`, and `goTo()` (when going to existing element) are now considered "terminal" operations.
+
+Terminal operation means that actions (that are not `setHistory`) called on the Backstack are *ignored* while the state change of the terminal action has not been completed yet.
+
+This is done to eliminate the possibility of enqueueing incorrect "forward" navigation immediately when a "back" navigation is happening, that could potentially create "illegal" navigation history.
+
+Illegal navigation history is a problem when using implicit scopes, as with the right button mashing, you could potentially "skip" an expected screen, and not have registered its services.
+
+Therefore, the possibility of this scenario is now blocked.
+
+
+-Simple Stack 2.1.1 (2019-09-26)
+--------------------------------
+
+- FIX: Make `findScopesForKey` work consistently even if a key is not a `ScopeKey`.
+
+- FIX: Add missing `@NonNull` on Context argument on some methods of Navigator.
+
+-Simple Stack 2.1.0 (2019-09-25)
+--------------------------------
+
+- FIX: Ensure that while navigation is in progress, `lookupService()` (and other service lookup methods) can access all currently built scopes, rather than only the latest navigation history currently being navigated to.
+
+This fix is crucial when `lookupService` is used inside `onFinishInflate` method of views inflated by ViewPager adapters; and returning from process death, navigation to a different screen is immediate (f.ex. deep-linking via notifications).
+
+-Simple Stack 2.0.3 (2019-05-20)
+--------------------------------
+
+- ADDED: `ServiceBinder.addAlias()` to allow adding an alias to an added service: available for look-up, but without getting callbacks by this registration (thus avoiding unnecessary `toBundle()` calls for a multi-registered service).
+
+-Simple Stack 2.0.0 (2019-04-30)
+--------------------------------
+
+**MAJOR API BREAKING CHANGES!** To create better consistency and naming, certain core APIs were renamed, moved around, restructured, etc.
+
+This means that 1.x and 2.x shouldn't be used in a project at the same time, because they're not compatible.
+
+- BREAKING CHANGE: `BackstackManager` is now `Backstack`.
+
+What was called `Backstack` is now called `NavigationCore` and is an internal class (not part of public API).
+
+(!) This also means that the `new Backstack(List<?>)` constructor is replaced with `new Backstack(); backstack.setup(List<?>)`.
+
+All sane public APIs of NavigationCore were moved over to the new Backstack (think navigation-related ones).
+
+This means that wherever you used to receive a `Backstack`, now you still receive a "Backstack", but it has additional functionality (such as `lookupService`).
+
+As a result, the following methods no longer exist:
+
+  - `BackstackDelegate.getManager()` is removed
+
+  - `Navigator.getManager()` is removed
+
+  - `ServiceBinder.getManager()` is removed
+
+With that, `StateChange.getBackstack()` now returns what was previously the `BackstackManager`, allowing access to scope-related functions.
+
+- BREAKING CHANGE: `ScopedServices.Scoped` is removed, and completely replaced with `ScopedServices.Registered`.
+
+- BREAKING CHANGE: `ScopedServices.Activated` behavior change, now only called once rather than multiple times if the service is in an active explicit parent chain.
+
+  - `onScopeActive()/onScopeInactive()` -> `onServiceActive()`/`onServiceInactive()`.
+
+Previously, you could get multiple callbacks to `onScopeActive` per each activated scope the service was in, now it is tracked per service instead and only called for `0->1` and `1->0`.
+
+- BREAKING CHANGE: `setShouldPersistContainerChild(true)` was the default, now it is default to `false`. It's only `true` by default if the `DefaultStateChanger` is used.
+
+If you use a custom-view-based setup and a custom state changer, please make sure to set `Navigator.configure().setShouldPersistContainerChild(true).install(...)`.
+
+- BREAKING CHANGE: `ScopedServices.ServiceBinder` is now moved to top-level, now accessible as `ServiceBinder`.
+
+- BREAKING CHANGE: `ViewChangeHandler.CompletionCallback` renamed to `ViewChangeHandler.ViewChangeCallback`.
+
+- BREAKING CHANGE: `StateKey` is renamed to `DefaultViewKey`.
+
+- BREAKING CHANGE: `HistoryBuilder` is now `History.Builder`. The deprecated `HistoryBuilder` factory methods were removed.
+
+- BREAKING CHANGE:
+
+  - `StateChange.getPreviousState()` -> `StateChange.getPreviousKeys()`
+  - `StateChange.getNewState()` -> `StateChange.getNewKeys()`
+  - `StateChange.topPreviousState()` -> `StateChange.topPreviousKey()`
+  - `StateChange.topNewState()` -> `StateChange.topNewKey()`
+  - `StateChange.isTopNewStateEqualToPrevious()` -> `StateChange.isTopNewKeyEqualToPrevious()`
+
+- BREAKING CHANGE: `StateChange.backstack()` -> `StateChange.getBackstack()`.
+
+- BREAKING CHANGE: ServiceBinder method renaming for sake of consistency.
+
+  - `ServiceBinder.add()` -> `ServiceBinder.addService()`
+  - `ServiceBinder.has()` -> `ServiceBinder.hasService()`
+  - `ServiceBinder.get()` -> `ServiceBinder.getService()`
+  - `ServiceBinder.canFind()` -> `ServiceBinder.canFindService()`
+  - `ServiceBinder.lookup()` -> `ServiceBinder.lookupService()`
+  - `ServiceBinder.canFindFrom()` -> `ServiceBinder.canFindFromScope()`
+  - `ServiceBinder.lookUpFrom()` -> `ServiceBinder.lookupFromScope()`
+
+- CHANGE/FIX: Added missing `@NonNull` annotation on `KeyContextWrapper.getKey()`. Now throws exception if the key is not found (previously returned null).
+
+
+-Simple Stack 1.14.1 (2019-04-26)
+--------------------------------
+
+- FIX: `onServiceUnregistered()` was called multiple times if the service was being unregistered from a scope where it was registered multiple times.
+
+- SAMPLE UPDATE: Safer version of the FragmentStateChanger that handles re-entrancy of `back` and going to the same target as where we were (handle `fragment.isRemoving`).
+
+- SAMPLE UPDATE: MVP/MVVM samples have a better packaging structure.
+
+
+-Simple Stack 1.14.0 (2019-03-16)
+--------------------------------
+
+- ADD: `ScopedServices.Registered` to receive a service lifecycle callback when a service is added to a scope for the first time (it was not in any other scopes).
+
+- ADD: `findScopesForKey(Object key, ScopeLookupMode mode)` to retrieve the list of scopes accessible from a given key.
+
+- FIX: A service registered in multiple scopes would receive `fromBundle(stateBundle)` callback in each scope where it was registered and when that given scope was entered, restoring potentially outdated state on back navigation.
+
+Now, a service will only receive `fromBundle` callback before its `onServiceRegistered()` callback, and not before *each* `onEnterScope(scopeTag)` callbacks.
+
+- FIX: during `backstackManager.finalizeScopes()`, `onExitScope` and `onScopeInactive` were dispatched in an incorrect order across nested explicit parents.
+
+- CHANGE: `persistViewToState()`/`restoreViewFromState()` now use a separate bundle from the one that's publicly visible on SavedState.
+
+
+-Simple Stack 1.13.4 (2019-03-10)
+--------------------------------
+
+- FIX: calling `backstackManager.finalizeScopes()` multiple times now results in consistent and defined behavior (namely, it gets ignored).
+
+- CHANGE: navigation that occurs after `backstackManager.finalizeScopes()` will now trigger reconstruction and proper callbacks of services in a consistent manner.
+
+- FIX: `ScopedServices.Activated`'s `onScopeInactive()` during scope finalization was called in order from explicit parent to child, instead of child to explicit parent.
+
+
+-Simple Stack 1.13.3 (2019-02-27)
+--------------------------------
+
+- FIX: NPE when `canFindFromScope()` was used on an uninitialized stack, instead of returning `false`.
+
+- ADD: `ScopeLookupMode` for `canFindFromScope()` and `lookupFromScope()` methods, which allows restricting the lookup only to the explicit parent chain).
+
+- ADD: `setGlobalServices()` to allow setting global services (that functions as the last parent of any parent chains).
+
+-Simple Stack 1.13.2 (2019-02-05)
+--------------------------------
+
+- FIX: Fix that a service registered multiple times in the same scope with different tags would receive service lifecycle callbacks as many times as it was registered.
+
+- ADD: Convenience method `stateChange.isTopNewStateEqualToPrevious()` to replace `stateChange.topNewState<Any>() == stateChange.topPreviousState()` condition check. It does the same thing, but maybe it's a bit easier to read.
+
+- FIX: Fix a typo which resulted in not throwing if the provided service tag was `null` (whoops. -_-)
+
+- UPDATE: `Backstack` now checks if altering methods are called from the thread where the backstack was created. 
+
+-Simple Stack 1.13.1 (2018-11-25)
+--------------------------------
+
+- UPDATE: Added `simple-stack-example-scoping` to showcase the usage of `ScopeKey.Child`, with Fragments and Navigator.
+
+- ADDED: `lookupFromScope()` and `canFindFromScope()` methods that begin the lookup from the specified scope, instead of the active-most one. This is to allow safer look-ups when the same service tag is used in different scopes.
+
+- UPDATE: Better error message if the scope does not exist for lookup (also provides the currently accessed scopes).
+
+-Simple Stack 1.13.0 (2018-09-10)
+--------------------------------
+- ADDED: Adds `ScopeKey.Child` interface, which allows the definition of *explicit* parent hierarchy of a given scope.
+
+Even by default, there is an implicit hierarchy between screens: it is possible to look up services defined by previous keys.
+
+However, there are times when we must define scopes that are supersets of multiple screens. In this case, we know we are on a given screen, within a given state, and we require a superscope to exist that is shared across multiple screens.
+
+In this case, the key can define an explicit parent hierarchy of scopes. These scopes are created before the key's own scope (assuming the key is also a ScopeKey).
+
+The parent scopes are only destroyed after all their children are destroyed.
+
+`lookupService()` prefers explicit parents, however will also continue to seek the service across implicit parents, and their explicit parent chain as well. 
+
+
+-Simple Stack 1.12.3 (2018-09-02)
+--------------------------------
+- CHANGE: When `lookupService` cannot find the service, the exception message is improved (and tells you what *could* be wrong in your configuration).
+
+- UPDATE: `mvp-view`, `mvp-fragments` and `mvvm-fragments` samples now use `ScopedServices` (and `Bundleable`)  to retain presenters/viewmodels across config changes and have their states persisted/restored across process death.  
+
+-Simple Stack 1.12.2 (2018-08-29)
+--------------------------------
+- CHANGE: `AnimatorViewChangeHandler` has an overridable method called `resetPreviousViewValues()`, which receives the previous view after animation is complete.
+
+- CHANGE: `FadeViewChangeHandler` and `SegueViewChangeHandler` now reset `alpha = 1f` and `translationX = 0f` respectively, after animation is complete and the view is removed.
+
+-Simple Stack 1.12.1 (2018-08-28)
+--------------------------------
+- ADDED: `ScopedServices.Activated`. Implementing `Activated` for a scoped service makes the service receive a callback when the scope it is bound to becomes the top-most scope, and when it stops being the top-most scope.
+
+There are strict ordering guarantees that `onEnterScope`, `onScopeActive`, `onScopeInactive`, `onExitScope` are called in *this* order.
+
+`onScopeInactive` is called in reverse order (just like `onExitScope`).
+
+When navigating from one scope to another scope, the new scope becomes active before the previous scope becomes inactive.
+
+-Simple Stack 1.12.0 (2018-08-23)
+--------------------------------
+- CHANGE: `backstack.top()` and `backstack.root()` now throw exception (just like `fromTop()`) if the method is called before a StateChanger is set (and the backstack becomes initialized). This makes using `root()`/`top()` nicer in Kotlin.
+
+- FIX: During a *second* "initialize" state change (which happens when calling `setStateChanger()`), accessing the Backstack's `getHistory()`, `top()` and `root()` inside the `StateChanger` could return incorrect value.
+
+- UPDATE: MVP samples are now written in Kotlin. MVVM sample now has a better SQLite-based non-Room reactive wrapper (for people trying out SQLite without Room). Some samples were renamed.
+
+-Simple Stack 1.11.7 (2018-08-18)
+--------------------------------
+- ADDED: `ServiceBinder.getBackstack()` method. This allows scoped services to be given the backstack as constructor argument.
+
+-Simple Stack 1.11.6 (2018-08-14)
+--------------------------------
+- ADDED: `Navigator.hasScope(scopeTag)`, `BackstackDelegate.hasScope(scopeTag)`, `BackstackManager.hasScope(scopeTag)`.
+
+- ADDED: `Navigator.canFindService(Context, serviceTag)`, `BackstackDelegate.canFindService(serviceTag)`, `BackstackManager.canFindService(serviceTag)` to check if `lookup` can find the service.
+
+- ADDED: `ServiceBinder.lookup()` and `ServiceBinder.canFind()` to inherit from currently existing scopes while creating service binding.
+
+- CHANGE: `onExitScope(scopeTag)` is now ensured to happen in reverse order compared to `onEnterScope(scopeTag)` (both in terms of scope creation order and service binding order).
+
+-Simple Stack 1.11.4 (2018-08-10)
+--------------------------------
+- ADDED: `Navigator.isNavigatorAvailable(Activity)` to ensure the ability to check if the `BackstackHost` is added to the Activity.
+
+- ADDED: `BackstackManager.lookupService(serviceTag)`, `BackstackDelegate.lookupService(serviceTag)`, and `Navigator.lookupService(Context, serviceTag)`, which attempts to look up the service in all currently existing scopes (starting from the newest added scope).
+
+-Simple Stack 1.11.2 (2018-07-26)
+--------------------------------
+- UPDATE: `state-bundle` is updated to 1.2.1.
+
+- CHANGE: Allow calling `BackstackDelegate.setScopedServices(activity, scopedServices)` once after an `onDestroy()` callback (to allow setting back the Activity).
+
+- CHANGE: Allow calling `BackstackDelegate.setScopedServices(null, scopedServices)`. In this case, `onDestroy()` will finalize scopes - normally it only does that if Activity is finalizing.
+
+-Simple Stack 1.11.1 (2018-07-14)
+--------------------------------
+- API CHANGE: `backstackDelegate.setScopedServices(ScopedServices)` is now `backstackDelegate.setScopedServices(Activity, ScopedServices)`.
+
+- FIX: If enclosing Activity is destroyed (`onDestroy`) *and* `Activity.isFinishing()`, then the existing scopes are destroyed along with it so that `Scoped.onExitScope()` is called properly, and resources are cleaned up as expected across closing the app and restarting it quickly.
+
+- MINOR FIX: Added `ScopedServices` javadoc and missing`@NonNull` on ServiceBinder.
+
+- DEPRECATED: `reset()` method. Renamed to `forceClear()`. You probably don't need it, but that wasn't clear enough.
+
+-Simple Stack 1.11.0 (2018-07-01)
+--------------------------------
+- ADDED: Ability to share data across screens via scoped services.
+
+To use, the key must implement `ScopeKey` and define its scope's tag. If `ScopeKey` is used, then a `ScopedServices` must be provided.
+
+Currently, a scope can be shared across keys, but there is no scope inheritance, and there is no way to have multiple scopes for a given key.
+
+To use, one must set an implementation of `ScopedServices` on either `BackstackDelegate`, `Navigator.Installer`, or `BackstackManager`.
+
+Services that are `Bundleable` and registered in a given scope receive callbacks to `toBundle()` and `fromBundle()` to persist/restore their state.
+
+Services registered in a given scope receive `onEnterScope()` and `onExitScope()` callbacks if they implement `ScopedServices.Scoped`.
+
+Tip: A possible way to simplify the usage of `service tags` is to define an inline reified extension function for `ServiceBinder` to default to using `T::class.java.name`.
+
+-Simple Stack 1.9.3 (2018-06-28)
+--------------------------------
+- ADDED: Ability to change duration, interpolation and start delay of `AnimatorViewChangeHandler`.
+
+- ADDED: `jumpToRoot(direction)`.
+
+-Simple Stack 1.9.2 (2018-06-01)
+--------------------------------
+- MINOR CHANGE: `DefaultStateChanger` uses `FadeViewChanger` for `StateChange.REPLACE` by default, instead of `NoOpViewChangeHandler`.
+
+-Simple Stack 1.9.1 (2018-05-20)
+--------------------------------
+- Fix: `History.single()` should return `History<T>`, not `List<T>`.
+
+- ADDED: `jumpToRoot()` and `moveToTop()` convenience operators to `Backstack`.
+
+- ADDED: `goUp(Object, boolean fallbackToBack)` and `goUpChain(List<?>, boolean fallbackToBack)` to allow opt-in for the newly provided navigation principle: "Up and Back are equivalent within your app's task"
+
+-Simple Stack 1.9.0 (2018-03-04)
+--------------------------------
+
+- DEPRECATED: HistoryBuilder's factory methods are moved from HistoryBuilder to the newly added `History` class.
+
+`HistoryBuilder.from(T... objects)` -> `History.builderOf(T... objects)`
+
+`HistoryBuilder.from(...)` -> `History.builderFrom(...)`
+
+`HistoryBuilder.single()` -> `History.single()`
+
+`HistoryBuilder.newBuilder()` -> `History.newBuilder()`
+
+Also adds `History.of(T... objects)` instead of `HistoryBuilder.of(...).build()`.
+
+- ADDED: `History` class, an immutable list with additional operations over `List<T>` - as some methods' return type.
+
+I also changed some return types (in history building) from `List<Object>` to `<T> List<T>`,
+this resulted in having to change some `List<Object>`s to `List<?>` on the receiving side if used in assignment.
+
+So if you run into that, just change `List<Object>` to `List<?>` and it should work.
+
+- ADDED: Long-overdue empty constructor for `BackstackDelegate` and `backstack.setStateChanger(StateChanger)`.
+
+- UPDATE: Kotlin sample replaces `PaperParcel` with `@Parcelize`.
+
+-Simple Stack 1.8.2 (2018-01-20)
+--------------------------------
+
+- CRITICAL FIX: `1.8.1 (2018-01-17)` didn't retrieve `state-bundle 1.2.0` as transitive dependency because of `com.github.dcendents:android-maven-gradle-plugin:1.5`. It is updated to `2.0` to fix publishing to Jitpack.
+
+- ADDED / CHANGE: `Navigator.findActivity(Context)` is now public. It also casts the returned Activity to whatever subclass type is expected.
+
+- ADDED: `Backstack.fromTop(int offset)` method, which provides the element in the backstack from the top with a given offset. 
+
+- Updated State-Bundle to 1.2.0.
 
 - Updated to use implementation/api and AS 3.0's tooling.
 
 - Updated implementation lib versions in samples and tests.
-
-- Updated State-Bundle to 1.2.0.
 
 - Updated Kotlin example to use Fragment-based usage.
 

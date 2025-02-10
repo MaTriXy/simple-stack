@@ -15,7 +15,7 @@
  */
 package com.zhuinden.simplestack;
 
-import android.support.annotation.NonNull;
+import javax.annotation.Nonnull;
 
 /**
  * The StateChanger handles the {@link StateChange}s that occur within the {@link Backstack}.
@@ -25,8 +25,11 @@ import android.support.annotation.NonNull;
 public interface StateChanger {
     /**
      * When the {@link StateChange} is complete, then the callback must be called.
+     *
+     * The callback MUST be called on the thread where the backstack was created.
      */
     interface Callback {
+        // @MainThread // removed android.support.annotation
         void stateChangeComplete();
     }
 
@@ -37,5 +40,5 @@ public interface StateChanger {
      * @param stateChange        the currently active state change in progress.
      * @param completionCallback the callback that must be called to signal that the state change is completed.
      */
-    void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback);
+    void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback);
 }

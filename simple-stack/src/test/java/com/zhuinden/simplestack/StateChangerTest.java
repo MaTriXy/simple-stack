@@ -18,14 +18,17 @@ package com.zhuinden.simplestack;
 import android.content.Context;
 import android.os.Parcel;
 import android.os.Parcelable;
-import android.support.annotation.NonNull;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import javax.annotation.Nonnull;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -42,10 +45,10 @@ public class StateChangerTest {
         private List<Object> newState;
 
         @Override
-        public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
+        public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
             this.stateChange = stateChange;
-            originalState = stateChange.getPreviousState();
-            newState = stateChange.getNewState();
+            originalState = stateChange.getPreviousKeys();
+            newState = stateChange.getNewKeys();
             completionCallback.stateChangeComplete();
         }
     }
@@ -271,21 +274,22 @@ public class StateChangerTest {
 
     @Before
     public void before() {
-        backstack = new Backstack(new A(), new B(), new C(), new D());
+        backstack = new Backstack();
+        backstack.setup(History.of(new A(), new B(), new C(), new D()));
         testStateChanger = new TestStateChanger();
-        backstack.setStateChanger(testStateChanger, Backstack.INITIALIZE);
+        backstack.setStateChanger(testStateChanger);
     }
 
     @Test
     public void stateChangeExposesBackstack() {
-        assertThat(testStateChanger.stateChange.backstack()).isSameAs(backstack);
+        assertThat(testStateChanger.stateChange.getBackstack()).isSameAs(backstack);
     }
 
     @Test
     public void stateChangeCreatesContextThatExposesKey() {
         Context context = Mockito.mock(Context.class);
-        Context newContext = testStateChanger.stateChange.createContext(context, testStateChanger.stateChange.topNewState());
-        assertThat(Backstack.getKey(newContext)).isSameAs(testStateChanger.stateChange.topNewState());
+        Context newContext = testStateChanger.stateChange.createContext(context, testStateChanger.stateChange.topNewKey());
+        assertThat(Backstack.getKey(newContext)).isSameAs(testStateChanger.stateChange.topNewKey());
     }
 
     @Test
@@ -323,8 +327,9 @@ public class StateChangerTest {
 
     @Test
     public void goBackOneElementReturnsFalse() {
-        backstack = new Backstack(new A());
-        backstack.setStateChanger(testStateChanger, Backstack.INITIALIZE);
+        backstack = new Backstack();
+        backstack.setup(History.of(new A()));
+        backstack.setStateChanger(testStateChanger);
         boolean didGoBack = backstack.goBack();
         assertThat(didGoBack).isFalse();
     }
@@ -340,5 +345,165 @@ public class StateChangerTest {
         assertThat(testStateChanger.originalState).containsExactly(new A(), new B(), new C(), new D());
         assertThat(testStateChanger.newState).containsExactly(new C(), new B(), new D());
         assertThat(backstack.getHistory()).containsExactlyElementsOf(testStateChanger.newState);
+    }
+
+    @Test
+    public void goBackIsTerminalAndIgnoresEnqueueCallsThatIsNotSetHistory() {
+        final AtomicReference<StateChanger.Callback> callbackRef = new AtomicReference<>();
+
+        final StateChanger stateChanger = new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                callbackRef.set(completionCallback);
+            }
+        };
+
+        backstack = new Backstack();
+        backstack.setup(History.of(new A(), new B()));
+        backstack.setStateChanger(stateChanger);
+
+        callbackRef.get().stateChangeComplete();
+
+        backstack.goBack();
+        backstack.goTo(new D());
+        callbackRef.get().stateChangeComplete();
+
+        try {
+            callbackRef.get().stateChangeComplete();
+            Assert.fail();
+        } catch(IllegalStateException e) {
+            // OK!
+        }
+
+        assertThat(backstack.getHistory()).containsExactly(new A());
+    }
+
+    @Test
+    public void jumpToRootIsTerminalAndIgnoresEnqueueCallsThatIsNotSetHistory() {
+        final AtomicReference<StateChanger.Callback> callbackRef = new AtomicReference<>();
+
+        final StateChanger stateChanger = new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                callbackRef.set(completionCallback);
+            }
+        };
+
+        backstack = new Backstack();
+        backstack.setup(History.of(new A(), new B()));
+        backstack.setStateChanger(stateChanger);
+
+        callbackRef.get().stateChangeComplete();
+
+        backstack.jumpToRoot();
+        backstack.goTo(new D());
+        callbackRef.get().stateChangeComplete();
+        try {
+            callbackRef.get().stateChangeComplete();
+            Assert.fail();
+        } catch(IllegalStateException e) {
+            // OK!
+        }
+
+        assertThat(backstack.getHistory()).containsExactly(new A());
+    }
+
+    @Test
+    public void goBackIsTerminalButEnqueuesSetHistory() {
+        final AtomicReference<StateChanger.Callback> callbackRef = new AtomicReference<>();
+
+        final StateChanger stateChanger = new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                callbackRef.set(completionCallback);
+            }
+        };
+
+        backstack = new Backstack();
+        backstack.setup(History.of(new A(), new B()));
+        backstack.setStateChanger(stateChanger);
+
+        callbackRef.get().stateChangeComplete();
+
+        backstack.goBack();
+        backstack.setHistory(History.of(new D()), StateChange.REPLACE);
+        callbackRef.get().stateChangeComplete();
+        callbackRef.get().stateChangeComplete();
+
+        assertThat(backstack.getHistory()).containsExactly(new D());
+    }
+
+    @Test
+    public void jumpToRootIsTerminalButEnqueuesSetHistory() {
+        final AtomicReference<StateChanger.Callback> callbackRef = new AtomicReference<>();
+
+        final StateChanger stateChanger = new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                callbackRef.set(completionCallback);
+            }
+        };
+
+        backstack = new Backstack();
+        backstack.setup(History.of(new A(), new B()));
+        backstack.setStateChanger(stateChanger);
+
+        callbackRef.get().stateChangeComplete();
+
+        backstack.jumpToRoot();
+        backstack.setHistory(History.of(new D()), StateChange.REPLACE);
+        callbackRef.get().stateChangeComplete();
+        callbackRef.get().stateChangeComplete();
+
+        assertThat(backstack.getHistory()).containsExactly(new D());
+    }
+
+    @Test
+    public void simpleStateChangerWorks() {
+        Backstack backstack = new Backstack();
+        A a = new A();
+        B b = new B();
+        C c = new C();
+
+        final List<Object> history = new ArrayList<>();
+
+        final SimpleStateChanger.NavigationHandler navigationHandler = new SimpleStateChanger.NavigationHandler() {
+            @Override
+            public void onNavigationEvent(@Nonnull StateChange stateChange) {
+                history.add(stateChange.topNewKey());
+            }
+        };
+
+        backstack.setup(History.of(a));
+        backstack.setStateChanger(new SimpleStateChanger(navigationHandler));
+
+        assertThat(history).containsExactly(a);
+
+        backstack.setHistory(History.of(b), StateChange.REPLACE);
+
+        assertThat(history).containsExactly(a, b);
+
+        backstack.goTo(c);
+
+        assertThat(history).containsExactly(a, b, c);
+
+        backstack.goTo(c);
+
+        assertThat(history).containsExactly(a, b, c);
+
+        backstack.goBack();
+
+        assertThat(history).containsExactly(a, b, c, b);
+
+        backstack.setHistory(History.of(a), StateChange.REPLACE);
+
+        assertThat(history).containsExactly(a, b, c, b, a);
+
+        try {
+            new SimpleStateChanger(null);
+            Assert.fail();
+        } catch(NullPointerException e) {
+            // OK
+        }
     }
 }

@@ -15,8 +15,16 @@
  */
 package com.zhuinden.simplestack;
 
+import android.content.Context;
 import android.os.Parcelable;
-import android.support.annotation.NonNull;
+import android.view.View;
+
+import com.zhuinden.simplestack.helpers.ServiceProvider;
+import com.zhuinden.simplestack.helpers.TestKey;
+import com.zhuinden.simplestack.helpers.TestKeyWithExplicitParent;
+import com.zhuinden.simplestack.helpers.TestKeyWithOnlyParentServices;
+import com.zhuinden.simplestack.helpers.TestKeyWithScope;
+import com.zhuinden.statebundle.StateBundle;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -24,281 +32,405 @@ import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Created by Zhuinden on 2017.01.20..
+ * Created by Owner on 2017. 03. 25..
  */
 
 public class BackstackTest {
-    StateChanger.Callback callback = null;
-    StateChange stateChange = null;
+    StateChanger stateChanger = new StateChanger() {
+        @Override
+        public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+            completionCallback.stateChangeComplete();
+        }
+    };
 
     @Test
-    public void initialKeysShouldNotBeEmpty() {
+    public void afterClearAndRestorationTheInitialKeysShouldBeRestoredAndNotOverwrittenByRestoredState() {
+        TestKey initial = new TestKey("initial");
+        TestKey restored = new TestKey("restored");
+
+        ArrayList<Parcelable> history = new ArrayList<>();
+        history.add(restored);
+        StateBundle stateBundle = new StateBundle();
+        stateBundle.putParcelableArrayList(Backstack.getHistoryTag(), history);
+
+        Backstack backstack = new Backstack();
+        backstack.setup(History.single(initial));
+        backstack.fromBundle(stateBundle);
+        backstack.setStateChanger(stateChanger);
+
+        if(!backstack.goBack()) {
+            backstack.forceClear();
+        }
+        assertThat(backstack.getHistory()).isEmpty();
+        backstack.setStateChanger(stateChanger);
+        assertThat(backstack.getHistory()).doesNotContain(restored);
+        assertThat(backstack.getHistory()).containsExactly(initial);
+    }
+
+    @Test
+    public void onGoBackKeysShouldNotBeClearedAndShouldRestoreRestoredKey() {
+        TestKey initial = new TestKey("initial");
+        TestKey restored = new TestKey("restored");
+
+        ArrayList<Parcelable> history = new ArrayList<>();
+        history.add(restored);
+        StateBundle stateBundle = new StateBundle();
+        stateBundle.putParcelableArrayList(Backstack.getHistoryTag(),
+                                           history);
+
+        Backstack backstack = new Backstack();
+        backstack.setup(History.single(initial));
+        backstack.fromBundle(stateBundle);
+        backstack.setStateChanger(stateChanger);
+
+
+        backstack.goBack();
+        assertThat(backstack.getHistory()).isNotEmpty();
+        assertThat(backstack.getHistory()).containsExactly(restored);
+        backstack.setStateChanger(stateChanger);
+        assertThat(backstack.getHistory()).containsExactly(restored);
+    }
+
+    @Test
+    public void afterClearAndRestorationTheFilteredAreNotRestored() {
+        final TestKey initial = new TestKey("initial");
+        final TestKey restored = new TestKey("restored");
+        final TestKey filtered = new TestKey("filtered");
+
+        ArrayList<Parcelable> history = new ArrayList<>();
+        history.add(restored);
+        history.add(filtered);
+        StateBundle stateBundle = new StateBundle();
+        stateBundle.putParcelableArrayList(Backstack.getHistoryTag(), history);
+
+        Backstack backstack = new Backstack();
+        backstack.setKeyFilter(new KeyFilter() {
+            @Nonnull
+            @Override
+            public List<Object> filterHistory(@Nonnull List<Object> restoredKeys) {
+                restoredKeys.remove(filtered);
+                return restoredKeys;
+            }
+        });
+        backstack.setup(History.single(initial));
+        backstack.fromBundle(stateBundle);
+        backstack.setStateChanger(stateChanger);
+
+
+        assertThat(backstack.getHistory()).contains(restored);
+        assertThat(backstack.getHistory()).doesNotContain(filtered);
+
+        //// would restore properly
+        backstack = new Backstack();
+        backstack.setup(History.single(initial));
+        backstack.fromBundle(stateBundle);
+        backstack.setStateChanger(stateChanger);
+
+        assertThat(backstack.getHistory()).contains(restored, filtered);
+
+        //// if both are filtered, restore initial
+        backstack = new Backstack();
+        backstack.setKeyFilter(new KeyFilter() {
+            @Nonnull
+            @Override
+            public List<Object> filterHistory(@Nonnull List<Object> restoredKeys) {
+                restoredKeys.remove(restored);
+                restoredKeys.remove(filtered);
+                return restoredKeys;
+            }
+        });
+
+        backstack.setup(History.single(initial));
+        backstack.fromBundle(stateBundle);
+        backstack.setStateChanger(stateChanger);
+
+
+        assertThat(backstack.getHistory()).doesNotContain(restored, filtered);
+        assertThat(backstack.getHistory()).contains(initial);
+    }
+
+    @Test
+    public void keyFilterSetAfterSetupShouldThrow() {
+        final TestKey initial = new TestKey("initial");
+        Backstack backstack = new Backstack();
+        backstack.setup(History.single(initial));
         try {
-            Backstack backstack = new Backstack();
+            backstack.setKeyFilter(new KeyFilter() {
+                @Nonnull
+                @Override
+                public List<Object> filterHistory(@Nonnull List<Object> restoredKeys) {
+                    return restoredKeys;
+                }
+
+            });
             Assert.fail();
-        } catch(IllegalArgumentException e) {
-            // good!
+        } catch(IllegalStateException e) {
+            // OK!
         }
     }
 
     @Test
-    public void initialKeysShouldNotBeEmptyList() {
-        try {
-            Backstack backstack = new Backstack(new ArrayList<Parcelable>());
-            Assert.fail();
-        } catch(IllegalArgumentException e) {
-            // good!
-        }
+    public void stateChangeCompletionListenerIsCalledCorrectly() {
+        final TestKey initial = new TestKey("initial");
+        final TestKey other = new TestKey("other");
+        final AtomicInteger atomicInteger = new AtomicInteger(0);
+        final List<Integer> integers = new ArrayList<>();
+        Backstack backstack = new Backstack();
+        backstack.setup(History.single(initial));
+        Backstack.CompletionListener stateChangeCompletionListener = new Backstack.CompletionListener() {
+            @Override
+            public void stateChangeCompleted(@Nonnull StateChange stateChange) {
+                integers.add(atomicInteger.getAndIncrement());
+            }
+        };
+        backstack.addStateChangeCompletionListener(stateChangeCompletionListener);
+        backstack.setStateChanger(stateChanger);
+        backstack.goTo(other);
+        backstack.goBack();
+        assertThat(integers).containsExactly(0, 1, 2);
+        backstack.removeStateChangeCompletionListener(stateChangeCompletionListener);
+        backstack.setHistory(History.single(other), StateChange.REPLACE);
+        assertThat(integers).containsExactly(0, 1, 2);
+        backstack.addStateChangeCompletionListener(stateChangeCompletionListener);
+        backstack.setHistory(History.single(initial), StateChange.REPLACE);
+        assertThat(integers).containsExactly(0, 1, 2, 3);
+        backstack.removeAllStateChangeCompletionListeners();
+        backstack.goTo(other);
+        assertThat(integers).containsExactly(0, 1, 2, 3);
     }
 
     @Test
-    public void initialKeysShouldNotBeNullList() {
-        try {
-            List<Parcelable> list = null;
-            Backstack backstack = new Backstack(list);
-            Assert.fail();
-        } catch(NullPointerException e) {
-            // good!
-        }
+    public void stateChangeCompletionListenerIsCalledInCorrectOrder() {
+        final TestKey initial = new TestKey("initial");
+        final TestKey other = new TestKey("other");
+        final List<TestKey> integers = new ArrayList<>();
+        Backstack backstack = new Backstack();
+        backstack.setup(History.single(initial));
+
+        Backstack.CompletionListener stateChangeCompletionListener = new Backstack.CompletionListener() {
+            @Override
+            public void stateChangeCompleted(@Nonnull StateChange stateChange) {
+                integers.add(stateChange.<TestKey>topNewKey());
+            }
+        };
+        backstack.addStateChangeCompletionListener(stateChangeCompletionListener);
+        backstack.setStateChanger(stateChanger);
+        backstack.detachStateChanger();
+        backstack.goTo(other);
+        backstack.setHistory(History.single(initial), StateChange.REPLACE);
+        backstack.setHistory(History.single(other), StateChange.REPLACE);
+        backstack.setHistory(History.single(initial), StateChange.REPLACE);
+        backstack.setHistory(History.single(initial), StateChange.REPLACE);
+        backstack.goTo(other);
+        backstack.reattachStateChanger();
+        assertThat(integers).containsExactly(
+                initial, other, initial, other, initial, initial, other);
     }
 
     @Test
-    public void stateChangerShouldNotBeNull() {
-        try {
-            Backstack backstack = new Backstack(new TestKey("Hi"));
-            backstack.setStateChanger(null, Backstack.INITIALIZE);
-            Assert.fail();
-        } catch(NullPointerException e) {
-            // good!
-        }
+    public void getInitialKeysReturnsExpectedValues() {
+        TestKey initial = new TestKey("initial");
+        TestKey restored = new TestKey("restored");
+
+        ArrayList<Parcelable> history = new ArrayList<>();
+        history.add(restored);
+        StateBundle stateBundle = new StateBundle();
+        stateBundle.putParcelableArrayList(Backstack.getHistoryTag(), history);
+
+        Backstack backstack = new Backstack();
+        backstack.setup(History.single(initial));
+        backstack.fromBundle(stateBundle);
+        backstack.setStateChanger(stateChanger);
+
+        backstack.goBack();
+        backstack.setStateChanger(stateChanger);
+
+        assertThat(backstack.getInitialKeys()).containsExactly(initial);
     }
 
     @Test
-    public void newHistoryShouldNotBeNull() {
-        try {
-            Backstack backstack = new Backstack(new TestKey("Hi"));
-            backstack.setHistory(null, StateChange.FORWARD);
-            Assert.fail();
-        } catch(IllegalArgumentException e) {
-            // good!
-        }
-    }
+    public void savedStateWorksForResultPassing() {
+        TestKey first = new TestKey("first");
 
-    @Test
-    public void newHistoryKeyShouldNotBeNull() {
-        try {
-            Backstack backstack = new Backstack(new TestKey("Hi"));
-            backstack.goTo(null);
-            Assert.fail();
-        } catch(IllegalArgumentException e) {
-            // good!
-        }
-    }
+        View view = Mockito.mock(View.class);
+        Context context = Mockito.mock(Context.class);
+        Mockito.when(view.getContext()).thenReturn(context);
+        Mockito.when(context.getSystemService(KeyContextWrapper.TAG)).thenReturn(first);
 
-    @Test
-    public void goBackShouldReturnTrueDuringActiveStateChange() {
-        TestKey hi = new TestKey("hi");
-        Backstack backstack = new Backstack(hi, new TestKey("bye"));
+        TestKey second = new TestKey("second");
 
+        Backstack backstack = new Backstack();
+        backstack.setup(History.of(first));
         backstack.setStateChanger(new StateChanger() {
             @Override
-            public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
-                callback = completionCallback;
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
             }
-        }, Backstack.INITIALIZE);
+        });
 
-        callback.stateChangeComplete();
+        backstack.goTo(second);
 
-        backstack.goTo(hi);
+        StateBundle firstBundle = backstack.getSavedState(first).getBundle();
+        firstBundle.putString("result", "Success!");
 
-        assertThat(backstack.goBack()).isTrue();
+        backstack.persistViewToState(view);
+
+        StateBundle persistedBundle = backstack.toBundle();
+
+        Backstack backstack2 = new Backstack();
+        backstack2.setup(History.of(second));
+        backstack2.fromBundle(persistedBundle);
+        backstack2.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        assertThat(backstack2.getSavedState(first).getBundle().getString("result")).isEqualTo(
+                "Success!");
     }
 
     @Test
-    public void goBackShouldReturnFalseWithOneElement() {
-        TestKey hi = new TestKey("hi");
-        Backstack backstack = new Backstack(hi);
+    public void uninitializedStackGoBackWorks() {
+        TestKey first = new TestKey("first");
 
-        backstack.setStateChanger(new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
-                callback = completionCallback;
-            }
-        }, Backstack.INITIALIZE);
+        Backstack backstack = new Backstack();
+        backstack.setup(History.of(first));
 
-        callback.stateChangeComplete();
         assertThat(backstack.goBack()).isFalse();
     }
 
-
     @Test
-    public void topPreviousStateReturnsNullDuringInitializeStateChange() {
-        TestKey hi = new TestKey("hi");
-        Backstack backstack = new Backstack(hi);
+    public void removeStateChangerListenersDoesNotBreakScoping() {
+        Backstack backstack = new Backstack();
 
-        backstack.setStateChanger(new StateChanger() {
+        ScopeKey key1 = new ScopeKey() {
+            @Nonnull
             @Override
-            public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
-                assertThat(stateChange.topPreviousState()).isNull();
-                callback = completionCallback;
+            public String getScopeTag() {
+                return "key1";
             }
-        }, Backstack.INITIALIZE);
 
-        callback.stateChangeComplete();
-    }
-
-    @Test
-    public void topPreviousStateReturnsTop() {
-        final TestKey hi = new TestKey("hi");
-        final TestKey bye = new TestKey("bye");
-        Backstack backstack = new Backstack(hi, bye);
-
-        backstack.setStateChanger(new StateChanger() {
             @Override
-            public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
-                if(!stateChange.getPreviousState().isEmpty()) {
-                    assertThat(stateChange.topPreviousState()).isEqualTo(bye);
+            public String toString() {
+                return "KEY1";
+            }
+        };
+
+        final ScopeKey key2 = new ScopeKey() {
+            @Nonnull
+            @Override
+            public String getScopeTag() {
+                return "key2";
+            }
+
+            @Override
+            public String toString() {
+                return "KEY2";
+            }
+        };
+
+        final Object key3 = new Object();
+
+        class Service implements ScopedServices.Registered, ScopedServices.Activated {
+            private boolean isActivatedCalled;
+            private boolean isDeactivatedCalled;
+            private boolean isRegisteredCalled;
+            private boolean isUnregisteredCalled;
+
+            @Override
+            public void onServiceActive() {
+                isActivatedCalled = true;
+            }
+
+            @Override
+            public void onServiceInactive() {
+                isDeactivatedCalled = true;
+            }
+
+            @Override
+            public void onServiceRegistered() {
+                isRegisteredCalled = true;
+            }
+
+            @Override
+            public void onServiceUnregistered() {
+                isUnregisteredCalled = true;
+            }
+        }
+
+        final Service service1 = new Service();
+        final Service service2 = new Service();
+
+        backstack.setScopedServices(new ScopedServices() {
+            @Override
+            public void bindServices(@Nonnull ServiceBinder serviceBinder) {
+                if("key1".equals(serviceBinder.getScopeTag())) {
+                    serviceBinder.addService("service1", service1);
                 }
-                callback = completionCallback;
+                if("key2".equals(serviceBinder.getScopeTag())) {
+                    serviceBinder.addService("service2", service2);
+                }
             }
-        }, Backstack.INITIALIZE);
+        });
 
-        callback.stateChangeComplete();
+        backstack.setup(History.of(key1));
 
-        backstack.goBack();
-        callback.stateChangeComplete();
-    }
-
-    @Test
-    public void pendingStateChangeCannotGoBackwards() {
-        PendingStateChange pendingStateChange = new PendingStateChange(null, StateChange.REPLACE, false);
-        pendingStateChange.setStatus(PendingStateChange.Status.COMPLETED);
-        try {
-            pendingStateChange.setStatus(PendingStateChange.Status.IN_PROGRESS);
-            Assert.fail();
-        } catch(IllegalStateException e) {
-            // Good!
-        }
-    }
-
-    @Test
-    public void pendingStateChangeStatusShouldNotBeNull() {
-        PendingStateChange pendingStateChange = new PendingStateChange(null, StateChange.REPLACE, false);
-        try {
-            pendingStateChange.setStatus(null);
-            Assert.fail();
-        } catch(NullPointerException e) {
-            // Good!
-        }
-    }
-
-    @Test
-    public void forceExecuteShouldExecuteAndSecondCallbackIsSwallowed() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
-
-        StateChanger stateChanger = new StateChanger() {
+        final StateChanger stateChanger = new StateChanger() {
             @Override
-            public void handleStateChange(@NonNull StateChange stateChange, @NonNull Callback completionCallback) {
-                callback = completionCallback;
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
             }
         };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        backstack.executePendingStateChange();
 
-        assertThat(backstack.isStateChangePending()).isFalse();
-        callback.stateChangeComplete();
-        // no exception thrown
+        backstack.setStateChanger(stateChanger);
+
+        backstack.removeStateChanger();
+
+        backstack.setHistory(History.of(key2), StateChange.REPLACE);
+
+        backstack.removeAllStateChangeCompletionListeners();
+
+        backstack.setStateChanger(stateChanger);
+
+        backstack.setHistory(History.of(key3), StateChange.REPLACE);
+
+        assertThat(service1.isActivatedCalled).isTrue();
+        assertThat(service1.isDeactivatedCalled).isTrue();
+        assertThat(service1.isRegisteredCalled).isTrue();
+        assertThat(service1.isUnregisteredCalled).isTrue();
+
+        assertThat(service2.isRegisteredCalled).isTrue();
+        assertThat(service2.isUnregisteredCalled).isTrue();
+        assertThat(service2.isActivatedCalled).isTrue();
+        assertThat(service2.isDeactivatedCalled).isTrue();
     }
-
+    
     @Test
-    public void nullChangeListenerAddShouldThrow() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
-        try {
-            backstack.addCompletionListener(null);
-            Assert.fail();
-        } catch(IllegalArgumentException e) {
-            // OK!
-        }
-    }
+    public void exitScopeThrowsWhenBackstackIsEmpty() {
+        Backstack backstack = new Backstack();
 
-    @Test
-    public void nullChangeListenerRemoveShouldThrow() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
-        try {
-            backstack.removeCompletionListener(null);
-            Assert.fail();
-        } catch(IllegalArgumentException e) {
-            // OK!
-        }
-    }
+        backstack.setScopedServices(new ServiceProvider());
 
-    @Test
-    public void completionListenerShouldBeCalled() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
-
-        Backstack.CompletionListener completionListener = Mockito.mock(Backstack.CompletionListener.class);
-        StateChanger stateChanger = new StateChanger() {
+        Object key = new TestKeyWithScope("blah") {
             @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
+            public void bindServices(ServiceBinder serviceBinder) {
             }
         };
-        backstack.addCompletionListener(completionListener);
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
 
-        callback.stateChangeComplete();
+        backstack.setup(History.of(key));
 
-        assertThat(backstack.isStateChangePending()).isFalse();
-        Mockito.verify(completionListener, Mockito.only()).stateChangeCompleted(stateChange);
-    }
-
-    @Test
-    public void removedCompletionListenerShouldNotBeCalled() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
-
-        Backstack.CompletionListener completionListener = Mockito.mock(Backstack.CompletionListener.class);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.addCompletionListener(completionListener);
-        backstack.removeCompletionListener(completionListener);
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-
-        callback.stateChangeComplete();
-
-        assertThat(backstack.isStateChangePending()).isFalse();
-        Mockito.verify(completionListener, Mockito.never()).stateChangeCompleted(stateChange);
-    }
-
-    @Test
-    public void resetShouldThrowIfStateChangeIsEnqueued() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger,
-                Backstack.INITIALIZE); // initialize state change
         try {
-            backstack.reset();
+            backstack.exitScope("blah");
             Assert.fail();
         } catch(IllegalStateException e) {
             // OK!
@@ -306,509 +438,624 @@ public class BackstackTest {
     }
 
     @Test
-    public void resetShouldClearStackIfStateChangeIsComplete() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
+    public void exitScopeThrowsWhenScopeIsNotFound() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object key = new TestKeyWithScope("blah") {
             @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
+            public void bindServices(ServiceBinder serviceBinder) {
             }
         };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
-        backstack.reset();
-        assertThat(backstack.getHistory()).isEmpty();
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial);
+
+        backstack.setup(History.of(key));
+
+        try {
+            backstack.exitScope("blahhhh");
+            Assert.fail();
+        } catch(IllegalStateException e) {
+            // OK!
+        }
+    }
+    
+    @Test
+    public void exitScopeDefaultsToJumpToRootIfRootHasScope() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object key = new TestKeyWithScope("blah") {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(key));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScope("blah");
+
+        assertThat(backstack.getHistory()).containsExactly(key);
     }
 
     @Test
-    public void replaceTopShouldThrowIfNullIsGiven() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
+    public void exitScopeExitsImplicitScopeCorrectly() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key = new TestKeyWithScope("blah") {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(firstKey, key, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScope("blah");
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey);
+    }
+
+    @Test
+    public void exitScopeExitsExplicitScopeCorrectly() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key = new TestKeyWithOnlyParentServices("key", History.of("blah")) {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(firstKey, key, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScope("blah");
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey);
+    }
+
+    @Test
+    public void exitScopeExitsExplicitScopesCorrectly() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object secondKey = new TestKey("secondKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key1 = new TestKeyWithExplicitParent("key1") {
+            @Nonnull
+            @Override
+            public List<String> getParentScopes() {
+                return History.of("blah", "parentKey1");
+            }
+
+            @Override
+            protected void bindParentServices(ServiceBinder serviceBinder) {
+            }
+
+            @Override
+            protected void bindOwnServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        Object key2 = new TestKeyWithExplicitParent("key2") {
+            @Nonnull
+            @Override
+            public List<String> getParentScopes() {
+                return History.of("blah", "parentKey2");
+            }
+
+            @Override
+            protected void bindParentServices(ServiceBinder serviceBinder) {
+            }
+
+            @Override
+            protected void bindOwnServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(firstKey, secondKey, key1, key2, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScope("blah");
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey, secondKey);
+    }
+
+    @Test
+    public void exitScopeToThrowsWhenBackstackIsEmpty() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object key = new TestKeyWithScope("blah") {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(key));
+
+        Object targetKey = new TestKey("target");
+
         try {
-            backstack.replaceTop(null, StateChange.REPLACE);
+            backstack.exitScopeTo("blah", targetKey, StateChange.FORWARD);
             Assert.fail();
-        } catch(IllegalArgumentException e) {
+        } catch(IllegalStateException e) {
             // OK!
         }
     }
 
     @Test
-    public void replaceTopShouldWorkAsIntended() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        TestKey another = new TestKey("another");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
+    public void exitScopeToThrowsWhenScopeIsNotFound() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object key = new TestKeyWithScope("blah") {
             @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
+            public void bindServices(ServiceBinder serviceBinder) {
             }
         };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial, other);
-        backstack.replaceTop(another, StateChange.FORWARD);
-        assertThat(stateChange.getDirection()).isEqualTo(StateChange.FORWARD);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial, another);
-    }
 
-    @Test
-    public void replaceTopReentrantShouldWorkAsIntended() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        TestKey another = new TestKey("another");
-        TestKey yetAnother = new TestKey("yetAnother");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial, other);
+        backstack.setup(History.of(key));
 
-        backstack.replaceTop(another, StateChange.BACKWARD);
-        backstack.replaceTop(yetAnother, StateChange.REPLACE);
-        assertThat(stateChange.getDirection()).isEqualTo(StateChange.BACKWARD);
-        callback.stateChangeComplete();
-        assertThat(stateChange.getDirection()).isEqualTo(StateChange.REPLACE);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial, yetAnother);
-    }
+        Object targetKey = new TestKey("target");
 
-    @Test
-    public void goUpThrowsForNull() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
         try {
-            backstack.goUp(null);
+            backstack.exitScopeTo("blah", targetKey, StateChange.FORWARD);
             Assert.fail();
-        } catch(IllegalArgumentException e) {
+        } catch(IllegalStateException e) {
             // OK!
         }
     }
 
     @Test
-    public void goUpReplacesTopForSingleElement() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
+    public void exitScopeToExitsImplicitScopeCorrectlyAndGoesBackIfFound() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object secondKey = new TestKey("secondKey");
+        Object thirdKey = new TestKey("thirdKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key = new TestKeyWithScope("blah") {
             @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
+            public void bindServices(ServiceBinder serviceBinder) {
             }
         };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goUp(other);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(other);
+
+        backstack.setup(History.of(firstKey, secondKey, thirdKey, key, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScopeTo("blah", secondKey, StateChange.BACKWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey, secondKey);
     }
 
     @Test
-    public void goUpWithMoreElementsNotFoundParentReplacesCurrentTop() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        TestKey another = new TestKey("another");
+    public void exitScopeToExitsImplicitScopeCorrectlyAndAppendsIfNotFound() {
+        Backstack backstack = new Backstack();
 
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object secondKey = new TestKey("secondKey");
+        Object thirdKey = new TestKey("thirdKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key = new TestKeyWithScope("blah") {
             @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
+            public void bindServices(ServiceBinder serviceBinder) {
             }
         };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
 
-        backstack.goUp(another);
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial, another);
+        Object targetKey = new TestKey("targetKey");
+
+        backstack.setup(History.of(firstKey, secondKey, thirdKey, key, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScopeTo("blah", targetKey, StateChange.FORWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey, secondKey, thirdKey, targetKey);
     }
 
     @Test
-    public void goUpWithMoreElementsFoundParentGoesToParent() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
+    public void exitScopeToExitsExplicitScopeCorrectlyAndGoesBackIfFound() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object secondKey = new TestKey("secondKey");
+        Object thirdKey = new TestKey("thirdKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key = new TestKeyWithOnlyParentServices("key", History.of("blah")) {
             @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
+            public void bindServices(ServiceBinder serviceBinder) {
             }
         };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
-        backstack.goUp(initial);
-        callback.stateChangeComplete();;
-        assertThat(backstack.getHistory()).containsExactly(initial);
+
+        backstack.setup(History.of(firstKey, secondKey, thirdKey, key, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScopeTo("blah", secondKey, StateChange.BACKWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey, secondKey);
     }
 
     @Test
-    public void goUpChainThrowsForNull() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
+    public void exitScopeToExitsExplicitScopeCorrectlyAndAppendsIfNotFound() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object secondKey = new TestKey("secondKey");
+        Object thirdKey = new TestKey("thirdKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key = new TestKeyWithOnlyParentServices("key", History.of("blah")) {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        Object targetKey = new TestKey("targetKey");
+
+        backstack.setup(History.of(firstKey, secondKey, thirdKey, key, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScopeTo("blah", targetKey, StateChange.FORWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey, secondKey, thirdKey, targetKey);
+    }
+
+    @Test
+    public void exitScopeToExitsExplicitScopesCorrectly() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object firstKey = new TestKey("firstKey");
+        Object secondKey = new TestKey("secondKey");
+        Object lastKey = new TestKey("lastKey");
+
+        Object key1 = new TestKeyWithExplicitParent("key1") {
+            @Nonnull
+            @Override
+            public List<String> getParentScopes() {
+                return History.of("blah", "parentKey1");
+            }
+
+            @Override
+            protected void bindParentServices(ServiceBinder serviceBinder) {
+            }
+
+            @Override
+            protected void bindOwnServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        Object key2 = new TestKeyWithExplicitParent("key2") {
+            @Nonnull
+            @Override
+            public List<String> getParentScopes() {
+                return History.of("blah", "parentKey2");
+            }
+
+            @Override
+            protected void bindParentServices(ServiceBinder serviceBinder) {
+            }
+
+            @Override
+            protected void bindOwnServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(firstKey, secondKey, key1, key2, lastKey));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        Object targetKey = new TestKeyWithScope("blah") {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.exitScopeTo("blah", targetKey, StateChange.FORWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(firstKey, secondKey, targetKey);
+    }
+
+    @Test
+    public void exitScopeToDefaultsToJumpToRootIfRootHasScope() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object key = new TestKeyWithScope("blah") {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        backstack.setup(History.of(key));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScopeTo("blah", key, StateChange.BACKWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(key);
+    }
+
+    @Test
+    public void exitScopeToWorks() {
+        Backstack backstack = new Backstack();
+
+        backstack.setScopedServices(new ServiceProvider());
+
+        Object key = new TestKeyWithScope("blah") {
+            @Override
+            public void bindServices(ServiceBinder serviceBinder) {
+            }
+        };
+
+        Object targetKey = new TestKey("targetKey");
+
+        backstack.setup(History.of(key));
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.exitScopeTo("blah", targetKey, StateChange.FORWARD);
+
+        assertThat(backstack.getHistory()).containsExactly(targetKey);
+    }
+
+    @Test
+    public void retainedObjectCannotBeRegisteredWithSameKey() {
+        Object retainedObject = new Object();
+
+        Backstack backstack = new Backstack();
+        assertThat(backstack.hasRetainedObject("duplicateKey")).isFalse();
+        backstack.addRetainedObject("duplicateKey", retainedObject);
+
         try {
-            backstack.goUpChain(null);
+            assertThat(backstack.hasRetainedObject("duplicateKey")).isTrue();
+
+            backstack.addRetainedObject("duplicateKey", retainedObject);
+            Assert.fail("Should have thrown");
+        } catch (IllegalArgumentException e) {
+            // OK
+        }
+
+        try {
+            backstack.getRetainedObject("blah");
             Assert.fail();
-        } catch(IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
+            // OK
+        }
+
+        Object currentObj = backstack.getRetainedObject("duplicateKey");
+        assertThat(currentObj).isSameAs(retainedObject);
+
+        Object obj = backstack.removeRetainedObject("duplicateKey");
+        assertThat(obj).isSameAs(retainedObject);
+    }
+
+    @Test
+    public void retainedObjectsDoRestorePendingState() {
+        TestKey initialKey = new TestKey("initialKey");
+        TestKey newKey = new TestKey("newKey");
+
+        Backstack backstack = new Backstack();
+        backstack.setup(History.of(initialKey));
+
+        class TestObject implements Bundleable {
+            private int currentState = 3;
+
+            @Nonnull
+            @Override
+            public StateBundle toBundle() {
+                StateBundle stateBundle = new StateBundle();
+                stateBundle.putInt("currentState", 5);
+                return stateBundle;
+            }
+
+            @Override
+            public void fromBundle(@Nullable StateBundle bundle) {
+                if (bundle != null) {
+                    currentState = bundle.getInt("currentState", 3);
+                }
+            }
+        }
+
+        class InvalidObject {
+        }
+
+        TestObject testObject = new TestObject();
+        TestObject testPendingObject = new TestObject();
+        TestObject testRemovedObject = new TestObject();
+        Object testNormalObject = new Object();
+
+        backstack.addRetainedObject("testObject", testObject);
+        backstack.addRetainedObject("testPendingObject", testPendingObject);
+        backstack.addRetainedObject("testRemovedObject", testRemovedObject);
+        backstack.addRetainedObject("testNormalObject", testNormalObject);
+
+        assertThat(testObject.currentState).isEqualTo(3);
+        assertThat(testPendingObject.currentState).isEqualTo(3);
+
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull StateChanger.Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        backstack.setHistory(History.of(newKey), StateChange.REPLACE);
+
+        StateBundle bundle = backstack.toBundle();
+
+        Backstack backstack2 = new Backstack();
+        backstack2.setup(History.of(initialKey));
+
+        assertThat(testObject.currentState).isEqualTo(3);
+        backstack2.addRetainedObject("testObject", testObject);
+        assertThat(testObject.currentState).isEqualTo(3);
+
+        backstack2.fromBundle(bundle);
+        assertThat(testObject.currentState).isEqualTo(5);
+
+        backstack2.addRetainedObject("testNormalObject", testNormalObject);
+
+        try {
+            backstack2.addRetainedObject("testPendingObject", new InvalidObject());
+            Assert.fail();
+        } catch (IllegalStateException e) {
             // OK!
         }
+
+        assertThat(testPendingObject.currentState).isEqualTo(3);
+        backstack2.addRetainedObject("testPendingObject", testPendingObject);
+        assertThat(testPendingObject.currentState).isEqualTo(5);
+
+        backstack2.removeRetainedObject("testRemovedObject");
+        backstack2.addRetainedObject("testRemovedObject", testRemovedObject);
+        assertThat(testRemovedObject.currentState).isEqualTo(3);
+
+        backstack2.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull StateChanger.Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        assertThat(backstack2.getHistory()).containsExactly(newKey);
     }
 
     @Test
-    public void goUpChainThrowsForEmptyList() {
-        TestKey initial = new TestKey("hello");
-        Backstack backstack = new Backstack(initial);
+    public void retainedObjectRestoringInvalidObjectFails() {
+        TestKey initialKey = new TestKey("initialKey");
+
+        Backstack backstack = new Backstack();
+        backstack.setup(History.of(initialKey));
+
+        class TestObject implements Bundleable {
+            private int currentState = 3;
+
+            @Nonnull
+            @Override
+            public StateBundle toBundle() {
+                StateBundle stateBundle = new StateBundle();
+                stateBundle.putInt("currentState", 5);
+                return stateBundle;
+            }
+
+            @Override
+            public void fromBundle(@Nullable StateBundle bundle) {
+                if (bundle != null) {
+                    currentState = bundle.getInt("currentState", 3);
+                }
+            }
+        }
+
+        class InvalidObject {
+        }
+
+        TestObject testObject = new TestObject();
+        InvalidObject invalidObject = new InvalidObject();
+
+        backstack.addRetainedObject("testObject", testObject);
+
+        assertThat(testObject.currentState).isEqualTo(3);
+
+        backstack.setStateChanger(new StateChanger() {
+            @Override
+            public void handleStateChange(@Nonnull StateChange stateChange, @Nonnull StateChanger.Callback completionCallback) {
+                completionCallback.stateChangeComplete();
+            }
+        });
+
+        StateBundle bundle = backstack.toBundle();
+
+        Backstack backstack2 = new Backstack();
+        backstack2.setup(History.of(initialKey));
+
+        backstack2.addRetainedObject("testObject", invalidObject);
         try {
-            backstack.goUpChain(new ArrayList<>());
+            backstack2.fromBundle(bundle);
             Assert.fail();
-        } catch(IllegalArgumentException e) {
+        } catch (IllegalStateException e) {
             // OK!
         }
-    }
-
-    @Test
-    public void goUpChainWithSingleElementWhenPreviousExists() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.single(initial));
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial);
-    }
-
-    @Test
-    public void goUpChainWithSingleElementWhenMorePreviousExists() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        Backstack backstack = new Backstack(initial1, initial2, initial3);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-
-        backstack.goUpChain(HistoryBuilder.from(initial1).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1);
-    }
-
-    @Test
-    public void goUpChainWithSingleElementWhenPreviousDoesNotExist() {
-        TestKey initial = new TestKey("hello");
-        TestKey other = new TestKey("other");
-        TestKey another = new TestKey("another");
-        Backstack backstack = new Backstack(initial);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-        backstack.goTo(other);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.single(another));
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial, another);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenNoneExists() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        Backstack backstack = new Backstack(initial3);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial1, initial2).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenMorePreviousExists() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial1, initial2).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2);
-    }
-
-    @Test
-    public void goUpChainWithSingleElementWhenPreviousDoesNotExistWithBefore() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial4).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2, initial4);
-    }
-
-
-    @Test
-    public void goUpChainWithMultipleElementWhenAllExistsWithBefore() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial2, initial3).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2, initial3);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenMorePreviousExistsWithBefore2() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial1, initial2).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenPreviousSomeExistsWithBefore() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial2, initial3).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2, initial3);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenPreviousSomeExistsWithBeforeAndReordering() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial2, initial1).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial2, initial1); //initial1 reordered to end
-    }
-
-
-    @Test
-    public void goUpChainWithMultipleElementWhenPreviousMoreExistsWithBeforeAndReordering() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial3, initial2, initial1).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial3, initial2, initial1); //initial1 reordered to end
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenPreviousNoneExistWithBefore() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-
-        TestKey other1 = new TestKey("other1");
-        TestKey other2 = new TestKey("other2");
-
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(other1, other2).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2, initial3, other1, other2);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenPreviousSomeExistWithBeforeAlsoKeepsPreviousInChain() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-
-        TestKey other1 = new TestKey("other1");
-        TestKey other2 = new TestKey("other2");
-        TestKey other3 = new TestKey("other3");
-
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(other3, initial2, initial4, other1, other2).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, other3, initial2, initial4, other1, other2);
-    }
-
-    @Test
-    public void goUpChainWithMultipleElementWhenPreviousMiddleExistsWithBefore() {
-        TestKey initial1 = new TestKey("hello1");
-        TestKey initial2 = new TestKey("hello2");
-        TestKey initial3 = new TestKey("hello3");
-        TestKey initial4 = new TestKey("hello4");
-        Backstack backstack = new Backstack(initial1, initial2, initial3, initial4);
-        StateChanger stateChanger = new StateChanger() {
-            @Override
-            public void handleStateChange(@NonNull StateChange _stateChange, @NonNull Callback completionCallback) {
-                stateChange = _stateChange;
-                callback = completionCallback;
-            }
-        };
-        backstack.setStateChanger(stateChanger, Backstack.INITIALIZE);
-        callback.stateChangeComplete();
-
-        backstack.goUpChain(HistoryBuilder.from(initial2, initial3).build());
-        callback.stateChangeComplete();
-        assertThat(backstack.getHistory()).containsExactly(initial1, initial2, initial3);
     }
 }
